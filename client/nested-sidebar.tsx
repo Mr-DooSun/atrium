@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { PanResponder, Pressable, ScrollView, Text, View, type GestureResponderHandlers, type LayoutRectangle } from "react-native";
 import {
   useAgent,
   useAgents,
@@ -24,7 +24,7 @@ import { ArchiveButton, ArchiveModal, archiveWarning, useArchive, type ArchiveTa
 import { RenameButton, RenameModal, useRename } from "./rename";
 import { RemoveProjectModal, useRemoveProject } from "./remove-project";
 import { MoveButton, ProjectMenu, ReorderBar, useProjectOrder } from "./project-order";
-import { applyOrder, move } from "../shared/project-order";
+import { applyOrder, dropIndex, move, orderTree, placeAt, rootsGroup, type BlockLayout } from "../shared/project-order";
 import { sidebarText } from "./sidebar-strings";
 
 const ROOT = "__root__";
@@ -36,6 +36,22 @@ interface Trail {
   readonly last: boolean;
 }
 const TrailContext = createContext<Trail>({ continues: [], last: true });
+
+/** The group projects are dragged in; sessions are dragged among their parent's children. */
+const PROJECTS = "__projects__";
+interface DragTarget {
+  readonly group: string;
+  readonly key: string;
+}
+/** The draggable item a row stands for; null for rows that do not move (a new chat row). */
+const DragTargetContext = createContext<DragTarget | null>(null);
+interface Drag extends DragTarget {
+  readonly dy: number;
+}
+/** Where the dragged item would land: on this item's top or bottom edge. */
+interface DropMark extends DragTarget {
+  readonly edge: "top" | "bottom";
+}
 
 interface Ctx {
   view: PluginSidebarViewProps;
@@ -53,6 +69,21 @@ interface Ctx {
   /** Moves a project one place up (-1) or down (+1). */
   moveProject(key: string, delta: -1 | 1): void;
   projectIndex: ReadonlyMap<string, number>;
+  /** The item being dragged on desktop and how far it moved; null when none is. */
+  drag: Drag | null;
+  dropMark: DropMark | null;
+  dragMove(target: DragTarget, dy: number): void;
+  /** Drops the dragged item where it is, or cancels the drag when `dy` is null. */
+  dragEnd(target: DragTarget, dy: number | null): void;
+  layout(target: DragTarget, rect: LayoutRectangle): void;
+  unlayout(target: DragTarget): void;
+  /**
+   * Wraps a press handler so it does nothing right after a drag: on the web the pointer's release
+   * still ends in a click, which would fold or open whatever the drag started on.
+   */
+  guard<A extends unknown[]>(fn: (...args: A) => void): (...args: A) => void;
+  /** The group a project's top rows are ordered in. */
+  rootGroup(projectKey: string): string;
 }
 
 /** Group keys → member keys, plus a key → ref lookup. */
@@ -140,9 +171,13 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     const inTree = new Set(tree.map((b) => b.projectKey));
     for (const ref of projects) if (!inTree.has(ref.key)) all.push({ projectKey: ref.key, roots: [] });
     const shown = all.filter((b) => projectRefs.has(b.projectKey));
-    // A hand-set order, when there is one, wins over recent work.
-    return applyOrder(shown, order.saved, (b) => rootOf(b.projectKey));
-  }, [tree, projects, projectRefs, order.saved, rootOf]);
+    // A hand-set order, when there is one, wins over recent work, for projects and the sessions
+    // under them at every depth.
+    return applyOrder(shown, order.saved, (b) => rootOf(b.projectKey)).map((b) => ({
+      ...b,
+      roots: orderTree(b.roots, rootsGroup(rootOf(b.projectKey)), order.nodes),
+    }));
+  }, [tree, projects, projectRefs, order.saved, order.nodes, rootOf]);
 
   const [reordering, setReordering] = useState(false);
   const projectIndex = useMemo(() => new Map(blocks.map((b, i) => [b.projectKey, i])), [blocks]);
@@ -153,6 +188,70 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     },
     [blocks, order, rootOf],
   );
+
+  // Desktop drag. Positions are kept per group of siblings, each relative to the siblings' common
+  // parent, which is all a drop needs: where the dragged item sits among the others.
+  const layouts = useRef(new Map<string, Map<string, BlockLayout>>());
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const dragEndedAt = useRef(0);
+  const groupBlocks = useCallback(
+    (group: string) => [...(layouts.current.get(group)?.values() ?? [])].sort((x, y) => x.y - y.y),
+    [],
+  );
+  const layout = useCallback(({ group, key }: DragTarget, rect: LayoutRectangle) => {
+    let blocksOf = layouts.current.get(group);
+    if (!blocksOf) layouts.current.set(group, (blocksOf = new Map()));
+    blocksOf.set(key, { key, y: rect.y, height: rect.height });
+  }, []);
+  const unlayout = useCallback(({ group, key }: DragTarget) => {
+    layouts.current.get(group)?.delete(key);
+  }, []);
+  const dragMove = useCallback(({ group, key }: DragTarget, dy: number) => setDrag({ group, key, dy }), []);
+  /** The index the dragged item would land at among the others; null when it would stay put. */
+  const landing = useCallback(
+    ({ group, key }: DragTarget, dy: number) => {
+      const all = groupBlocks(group);
+      const at = dropIndex(all, key, dy);
+      if (at < 0 || at === all.findIndex((b) => b.key === key)) return null;
+      return { all, at };
+    },
+    [groupBlocks],
+  );
+  const dragEnd = useCallback(
+    (target: DragTarget, dy: number | null) => {
+      setDrag(null);
+      dragEndedAt.current = Date.now();
+      if (dy === null) return;
+      const land = landing(target, dy);
+      if (!land) return;
+      const shown = land.all.map((b) => b.key);
+      if (target.group === PROJECTS) {
+        order.save(placeAt(shown.map(rootOf), order.saved, rootOf(target.key), land.at));
+      } else {
+        // Only the children shown now: archived sessions do not come back, so they need no place.
+        order.saveNodes(target.group, placeAt(shown, [], target.key, land.at));
+      }
+    },
+    [landing, order, rootOf],
+  );
+  const dropMark = useMemo((): DropMark | null => {
+    if (!drag) return null;
+    const land = landing(drag, drag.dy);
+    if (!land) return null;
+    const others = land.all.filter((b) => b.key !== drag.key);
+    if (others.length === 0) return null;
+    return land.at < others.length
+      ? { group: drag.group, key: others[land.at].key, edge: "top" }
+      : { group: drag.group, key: others[others.length - 1].key, edge: "bottom" };
+  }, [drag, landing]);
+  const guard = useCallback(
+    <A extends unknown[]>(fn: (...args: A) => void) =>
+      (...args: A) => {
+        if (Date.now() - dragEndedAt.current > 400) fn(...args);
+      },
+    [],
+  );
+  const rootGroup = useCallback((projectKey: string) => rootsGroup(rootOf(projectKey)), [rootOf]);
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((key: string) => {
@@ -179,6 +278,14 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     startReorder: () => setReordering(true),
     moveProject,
     projectIndex,
+    drag,
+    dropMark,
+    dragMove,
+    dragEnd,
+    layout,
+    unlayout,
+    guard,
+    rootGroup,
   };
 
   return (
@@ -208,10 +315,14 @@ function ProjectBlock({ project, ctx }: { project: { projectKey: string; roots: 
   const open = !ctx.reordering && !ctx.collapsed.has(project.projectKey);
   const { p } = ctx;
   const empty = project.roots.length === 0;
+  const target = useMemo(() => ({ group: PROJECTS, key: project.projectKey }), [project.projectKey]);
+  const group = ctx.rootGroup(project.projectKey);
   if (!ref) return null;
   return (
-    <View style={{ paddingBottom: open ? PROJECT.blockGap : 2 }}>
-      <ProjectRow reference={ref} open={open} ctx={ctx} />
+    <DragItem target={target} inset={0} paddingBottom={open ? PROJECT.blockGap : 2} ctx={ctx}>
+      <DragTargetContext.Provider value={target}>
+        <ProjectRow reference={ref} open={open} ctx={ctx} />
+      </DragTargetContext.Provider>
       {open ? (
         // The project's line leaves its chevron and runs down to the first row.
         <View
@@ -237,6 +348,7 @@ function ProjectBlock({ project, ctx }: { project: { projectKey: string; roots: 
             <Node
               key={node.key}
               node={node}
+              group={group}
               depth={0}
               place={null}
               trail={{ continues: [], last: i === project.roots.length - 1 }}
@@ -244,7 +356,7 @@ function ProjectBlock({ project, ctx }: { project: { projectKey: string; roots: 
             />
           ))
         : null}
-    </View>
+    </DragItem>
   );
 }
 
@@ -269,12 +381,15 @@ function StartChatRow({ reference, ctx }: { reference: ProjectRef; ctx: Ctx }) {
 /** `place`: the workspace the parent row lives in, so a row names its own only when it differs. */
 function Node({
   node,
+  group,
   depth,
   place,
   trail,
   ctx,
 }: {
   node: TreeNode;
+  /** The group it is dragged in: its parent's key, or its project's for a top row. */
+  group: string;
   depth: number;
   place: string | null;
   trail: Trail;
@@ -283,20 +398,25 @@ function Node({
   const open = !ctx.collapsed.has(node.key);
   const here = node.kind === "workspace" ? node.key : (ctx.agentWorkspace.get(node.key) ?? place);
   const childContinues = [...trail.continues, !trail.last];
+  const target = useMemo(() => ({ group, key: node.key }), [group, node.key]);
+  // The row and everything under it move as one.
   return (
-    <>
+    <DragItem target={target} inset={slotX(depth) - 6} ctx={ctx}>
       <TrailContext.Provider value={trail}>
-        {node.kind === "workspace" ? (
-          <WorkspaceRow node={node} depth={depth} open={open} ctx={ctx} />
-        ) : (
-          <AgentRow node={node} depth={depth} open={open} away={here !== place ? here : null} ctx={ctx} />
-        )}
+        <DragTargetContext.Provider value={target}>
+          {node.kind === "workspace" ? (
+            <WorkspaceRow node={node} depth={depth} open={open} ctx={ctx} />
+          ) : (
+            <AgentRow node={node} depth={depth} open={open} away={here !== place ? here : null} ctx={ctx} />
+          )}
+        </DragTargetContext.Provider>
       </TrailContext.Provider>
       {open
         ? node.children.map((child, i) => (
             <Node
               key={child.key}
               node={child}
+              group={node.key}
               depth={depth + 1}
               place={here}
               trail={{ continues: childContinues, last: i === node.children.length - 1 }}
@@ -304,7 +424,67 @@ function Node({
             />
           ))
         : null}
-    </>
+    </DragItem>
+  );
+}
+
+/**
+ * Something that can be dragged among its siblings: a project with its rows, or a row with the
+ * rows under it. Reports where it sits, follows the pointer while dragged, and shows the drop
+ * line when the dragged item would land next to it.
+ */
+function DragItem({
+  target,
+  inset,
+  paddingBottom,
+  ctx,
+  children,
+}: {
+  target: DragTarget;
+  /** Where the drop line starts, so it lines up with the item's own indent. */
+  inset: number;
+  paddingBottom?: number;
+  ctx: Ctx;
+  children: ReactNode;
+}) {
+  const { layout, unlayout } = ctx;
+  useEffect(() => () => unlayout(target), [unlayout, target]);
+  const same = (t: DragTarget | null) => t !== null && t.group === target.group && t.key === target.key;
+  const dragged = same(ctx.drag) ? ctx.drag : null;
+  const mark = same(ctx.dropMark) ? ctx.dropMark!.edge : null;
+  return (
+    <View
+      onLayout={(e) => layout(target, e.nativeEvent.layout)}
+      style={{
+        paddingBottom,
+        // The dragged item follows the pointer above the others.
+        ...(dragged
+          ? {
+              transform: [{ translateY: dragged.dy }],
+              zIndex: 10,
+              opacity: 0.85,
+              borderRadius: 8,
+              backgroundColor: ctx.p.background,
+            }
+          : null),
+      }}
+    >
+      {children}
+      {mark ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: Math.max(0, inset),
+            right: 4,
+            [mark]: -1,
+            height: 2,
+            borderRadius: 1,
+            backgroundColor: ctx.p.foreground,
+          }}
+        />
+      ) : null}
+    </View>
   );
 }
 
@@ -376,12 +556,16 @@ function Row({
   // stays hovered while the pointer is on its archive button or chevron and back again.
   const [hovered, setHovered] = useState(false);
   const { p } = ctx;
+  const dragHandlers = useDragHandlers(useContext(DragTargetContext), ctx);
   return (
+    <View {...dragHandlers}>
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      onPress={onPress}
-      onLongPress={onLongPress}
+      onPress={ctx.guard(onPress)}
+      // Desktop rows archive from their hover button; a long press there would fire while the
+      // pointer rests before a drag.
+      onLongPress={onLongPress && ctx.compact ? onLongPress : undefined}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       // Indent is row padding, so hover and selection still span the full width.
@@ -401,6 +585,7 @@ function Row({
       <Connectors ctx={ctx} />
       {children(hovered)}
     </Pressable>
+    </View>
   );
 }
 
@@ -424,7 +609,7 @@ function Leading({
         accessibilityRole="button"
         accessibilityLabel={open ? "Collapse" : "Expand"}
         hitSlop={6}
-        onPress={() => ctx.toggle(node.key)}
+        onPress={ctx.guard(() => ctx.toggle(node.key))}
         style={{ width: 16, height: TITLE_LINE, alignItems: "center", justifyContent: "center" }}
       >
         <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={ctx.p.muted} />
@@ -636,8 +821,8 @@ function WorkspaceRow({
               ) : null}
               {hovered && !archive.confirming && !rename.editing ? (
                 <View style={{ flexDirection: "row", gap: 2 }}>
-                  <RenameButton onPress={rename.begin} p={p} />
-                  {canArchive ? <ArchiveButton onPress={archive.begin} p={p} /> : null}
+                  <RenameButton onPress={ctx.guard(rename.begin)} p={p} />
+                  {canArchive ? <ArchiveButton onPress={ctx.guard(archive.begin)} p={p} /> : null}
                 </View>
               ) : (
                 <StatusMark bucket={mostUrgent(ws.indicator, below)} p={p} />
@@ -739,7 +924,7 @@ function AgentRow({
                 {hidden > 0 ? `${hidden}개 접힘` : ""}
               </Text>
               {hovered && canArchive && !archive.confirming ? (
-                <ArchiveButton onPress={archive.begin} p={p} />
+                <ArchiveButton onPress={ctx.guard(archive.begin)} p={p} />
               ) : (
                 <StatusMark bucket={mostUrgent(agentBucket(agent), below)} p={p} />
               )}
@@ -795,6 +980,7 @@ function ProjectRow({
   const [menu, setMenu] = useState(false);
   const index = ctx.projectIndex.get(reference.key) ?? 0;
   const last = ctx.projectIndex.size - 1;
+  const dragHandlers = useDragHandlers(useContext(DragTargetContext), ctx);
   // Folded, the header stands in for its rows: it shows the most urgent state among them.
   const urgent = useUrgentInProject(reference, !open);
   const { p } = ctx;
@@ -812,6 +998,7 @@ function ProjectRow({
     />
     {/* Hover is tracked on the whole header so moving onto its buttons keeps them shown. */}
     <View
+      {...dragHandlers}
       style={{ marginBottom: PROJECT.gapBelow }}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
@@ -820,10 +1007,10 @@ function ProjectRow({
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         accessibilityLabel={name}
-        onPress={() => (ctx.reordering ? undefined : ctx.toggle(reference.key))}
-        // A long press reorders projects. Compact layouts have no hover, so there it opens a menu
-        // that also holds removing the project.
-        onLongPress={ctx.reordering ? undefined : ctx.compact ? () => setMenu(true) : ctx.startReorder}
+        onPress={ctx.guard(() => (ctx.reordering ? undefined : ctx.toggle(reference.key)))}
+        // Desktop reorders by dragging, so a long press does nothing there. Compact layouts have no
+        // hover or drag: a long press opens a menu with reordering and removing the project.
+        onLongPress={ctx.compact && !ctx.reordering ? () => setMenu(true) : undefined}
         style={({ pressed }) => ({
           minHeight: ROW.minHeight,
           paddingVertical: ROW.paddingVertical,
@@ -843,7 +1030,8 @@ function ProjectRow({
             color={hovered ? p.foreground : p.muted}
           />
         </View>
-        <Text numberOfLines={1} style={{ flex: 1, color: p.muted, fontSize: 14 }}>
+        {/* Not selectable, so dragging the header never selects its name. */}
+        <Text numberOfLines={1} selectable={false} style={{ flex: 1, color: p.muted, fontSize: 14 }}>
           {name}
         </Text>
       </Pressable>
@@ -858,7 +1046,7 @@ function ProjectRow({
         accessibilityRole="button"
         accessibilityLabel={`New workspace in ${name}`}
         hitSlop={6}
-        onPress={() => ctx.view.navigation.openProject(reference)}
+        onPress={ctx.guard(() => ctx.view.navigation.openProject(reference))}
         style={({ pressed }) => ({
           position: "absolute",
           right: 6,
@@ -884,7 +1072,7 @@ function ProjectRow({
           accessibilityRole="button"
           accessibilityLabel={t("remove")}
           hitSlop={6}
-          onPress={remove.begin}
+          onPress={ctx.guard(remove.begin)}
           style={({ pressed }) => ({
             position: "absolute",
             right: 34,
@@ -904,5 +1092,31 @@ function ProjectRow({
       )}
     </View>
     </>
+  );
+}
+
+/**
+ * Desktop only: dragging a row or project header up or down moves it among its siblings. The drag
+ * takes over from the row's press once the pointer has moved a few pixels up or down, so a click
+ * still opens or folds and a sideways move does nothing.
+ */
+const NO_HANDLERS: GestureResponderHandlers = {};
+function useDragHandlers(target: DragTarget | null, ctx: Ctx): GestureResponderHandlers {
+  const latest = useRef(ctx);
+  latest.current = ctx;
+  return useMemo(
+    () =>
+      target
+        ? PanResponder.create({
+            onMoveShouldSetPanResponderCapture: (_, g) =>
+              !latest.current.compact && Math.abs(g.dy) > 6 && Math.abs(g.dy) > Math.abs(g.dx),
+            onPanResponderGrant: (_, g) => latest.current.dragMove(target, g.dy),
+            onPanResponderMove: (_, g) => latest.current.dragMove(target, g.dy),
+            onPanResponderRelease: (_, g) => latest.current.dragEnd(target, g.dy),
+            onPanResponderTerminate: () => latest.current.dragEnd(target, null),
+            onPanResponderTerminationRequest: () => false,
+          }).panHandlers
+        : NO_HANDLERS,
+    [target],
   );
 }
