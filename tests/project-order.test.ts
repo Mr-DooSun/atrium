@@ -57,7 +57,7 @@ test("applyOrder can put unplaced items last", () => {
   assert.deepEqual(applyOrder(["a", "new", "b"], ["b", "a"], id, "last"), ["b", "a", "new"]);
 });
 
-const agent = (key: string, children: TreeNode[] = []): TreeNode => ({ kind: "agent", key, ownsWorkspace: true, children });
+const agent = (key: string, children: TreeNode[] = []): TreeNode => ({ kind: "agent", key, ownsWorkspace: true, parentWorktree: null, children });
 const keys = (nodes: readonly TreeNode[]): unknown[] =>
   nodes.map((n) => (n.children.length ? [n.key, keys(n.children)] : n.key));
 

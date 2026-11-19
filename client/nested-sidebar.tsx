@@ -15,9 +15,9 @@ import {
 } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plugin";
-import { buildTree, type TreeNode } from "../shared/tree";
-import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, type Palette } from "./look";
-import { ProviderMark, StatusMark, URGENT, agentBucket, mostUrgent } from "./marks";
+import { buildTree, type TreeNode, type WorkspaceContext } from "../shared/tree";
+import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, projectAppearance, type Palette } from "./look";
+import { MetaLine, ProviderMark, StatusMark, URGENT, agentBucket, mostUrgent } from "./marks";
 import type { Bucket } from "./look";
 import { ChatSection, useChatDir } from "./chat";
 import { ArchiveButton, ArchiveModal, archiveWarning, useArchive, type ArchiveTarget } from "./archive";
@@ -36,6 +36,7 @@ interface Trail {
   readonly last: boolean;
 }
 const TrailContext = createContext<Trail>({ continues: [], last: true });
+const ProjectRailContext = createContext<string | null>(null);
 
 /** The group projects are dragged in; sessions are dragged among their parent's children. */
 const PROJECTS = "__projects__";
@@ -118,6 +119,13 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   const workspaceOrder = useWorkspaces({ where: inTree, orderBy: ["createdAt", "desc"] });
   const agentOrder = useAgents({ where: visibleAgent, orderBy: ["createdAt", "asc"] });
   const byProject = useWorkspaces({ where: inTree, groupBy: (w) => w.project.key });
+  // Workspace queries return refs. Group by the displayed values so renames and branch changes
+  // update the tree even when those refs and their order stay the same.
+  const byWorkspaceContext = useWorkspaces({
+    where: inTree,
+    groupBy: ({ id, hostId, directory, name, title, branch }) =>
+      JSON.stringify({ id, hostId, directory, name: title ?? name, branch }),
+  });
   const byCreator = useWorkspaces({
     where: inTree,
     groupBy: (w) => w.parentAgent?.key ?? ROOT,
@@ -139,6 +147,11 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     for (const [agent, ws] of workspace.owner) if (ws) agentWorkspace.set(agent, ws);
     const workspaceProject = new Map<string, string>();
     for (const [ws, pr] of project.owner) if (pr) workspaceProject.set(ws, pr);
+    const workspaceContext = new Map<string, WorkspaceContext>();
+    for (const group of byWorkspaceContext) {
+      const context = JSON.parse(group.key) as WorkspaceContext;
+      for (const ref of group.items) workspaceContext.set(ref.key, context);
+    }
     return {
       tree: buildTree({
         workspaces: workspaceOrder.map((r) => r.key),
@@ -147,12 +160,13 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
         workspaceParentAgent: creator.owner,
         agentWorkspace,
         agentParent: parent.owner,
+        workspaceContext,
       }),
       workspaceRefs: project.refs,
       agentRefs: workspace.refs,
       agentWorkspace,
     };
-  }, [workspaceOrder, agentOrder, byProject, byCreator, byWorkspace, byParent]);
+  }, [workspaceOrder, agentOrder, byProject, byCreator, byWorkspace, byParent, byWorkspaceContext]);
 
   const projectRefs = useMemo(() => new Map(projects.map((r) => [r.key, r])), [projects]);
   // The saved order names projects by root folder, which outlives the project's id.
@@ -299,8 +313,14 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
           onDone={() => setReordering(false)}
         />
       ) : null}
-      {blocks.map((project) => (
-        <ProjectBlock key={project.projectKey} project={project} ctx={ctx} />
+      {blocks.map((project, i) => (
+        <ProjectBlock
+          key={project.projectKey}
+          project={project}
+          folderKey={rootOf(project.projectKey)}
+          last={i === blocks.length - 1}
+          ctx={ctx}
+        />
       ))}
     </ScrollView>
     <ChatSection view={view} p={p} chatDir={chatDir} />
@@ -309,19 +329,29 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
 }
 
 /** A project: its header, then its rows on the indented rail; an empty project offers a new chat. */
-function ProjectBlock({ project, ctx }: { project: { projectKey: string; roots: readonly TreeNode[] }; ctx: Ctx }) {
+function ProjectBlock({
+  project,
+  folderKey,
+  last,
+  ctx,
+}: {
+  project: { projectKey: string; roots: readonly TreeNode[] };
+  folderKey: string;
+  last: boolean;
+  ctx: Ctx;
+}) {
   const ref = ctx.projectRefs.get(project.projectKey);
   // While reordering only the headers show, so the whole list fits and moves read clearly.
   const open = !ctx.reordering && !ctx.collapsed.has(project.projectKey);
-  const { p } = ctx;
+  const { accent, rail, divider } = projectAppearance(folderKey, ctx.view.theme);
   const empty = project.roots.length === 0;
   const target = useMemo(() => ({ group: PROJECTS, key: project.projectKey }), [project.projectKey]);
   const group = ctx.rootGroup(project.projectKey);
   if (!ref) return null;
   return (
-    <DragItem target={target} inset={0} paddingBottom={open ? PROJECT.blockGap : 2} ctx={ctx}>
+    <DragItem target={target} inset={0} paddingBottom={ctx.reordering ? 2 : PROJECT.blockGap} ctx={ctx}>
       <DragTargetContext.Provider value={target}>
-        <ProjectRow reference={ref} open={open} ctx={ctx} />
+        <ProjectRow reference={ref} open={open} accent={accent} ctx={ctx} />
       </DragTargetContext.Provider>
       {open ? (
         // The project's line leaves its chevron and runs down to the first row.
@@ -334,28 +364,43 @@ function ProjectBlock({ project, ctx }: { project: { projectKey: string; roots: 
             top: ROW.minHeight / 2 + 9,
             height: ROW.minHeight / 2 - 9 + PROJECT.gapBelow + 2,
             width: 1,
-            backgroundColor: p.guide,
+            backgroundColor: rail,
           }}
         />
       ) : null}
-      {open && empty ? (
-        <TrailContext.Provider value={{ continues: [], last: true }}>
-          <StartChatRow reference={ref} ctx={ctx} />
-        </TrailContext.Provider>
+      <ProjectRailContext.Provider value={rail}>
+        {open && empty ? (
+          <TrailContext.Provider value={{ continues: [], last: true }}>
+            <StartChatRow reference={ref} ctx={ctx} />
+          </TrailContext.Provider>
+        ) : null}
+        {open
+          ? project.roots.map((node, i) => (
+              <Node
+                key={node.key}
+                node={node}
+                group={group}
+                depth={0}
+                place={null}
+                trail={{ continues: [], last: i === project.roots.length - 1 }}
+                ctx={ctx}
+              />
+            ))
+          : null}
+      </ProjectRailContext.Provider>
+      {!last && !ctx.reordering ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            bottom: PROJECT.blockGap / 2,
+            left: PROJECT.dividerInset,
+            right: PROJECT.dividerInset,
+            height: 1,
+            backgroundColor: divider,
+          }}
+        />
       ) : null}
-      {open
-        ? project.roots.map((node, i) => (
-            <Node
-              key={node.key}
-              node={node}
-              group={group}
-              depth={0}
-              place={null}
-              trail={{ continues: [], last: i === project.roots.length - 1 }}
-              ctx={ctx}
-            />
-          ))
-        : null}
     </DragItem>
   );
 }
@@ -493,7 +538,8 @@ function DragItem({
 /** Tree connectors: ancestor lines that continue past this row, then this row's elbow. */
 function Connectors({ ctx }: { ctx: Ctx }) {
   const { continues, last } = useContext(TrailContext);
-  const color = ctx.p.guide;
+  const rail = useContext(ProjectRailContext);
+  const color = (column: number) => (column === 0 ? rail : null) ?? ctx.p.guide;
   const own = continues.length;
   const x = (column: number) => connectorX(column) - 0.5;
   // The elbow reaches to just short of the row's leading slot.
@@ -505,7 +551,7 @@ function Connectors({ ctx }: { ctx: Ctx }) {
           <View
             key={column}
             pointerEvents="none"
-            style={{ position: "absolute", left: x(column), top: -2, bottom: -2, width: 1, backgroundColor: color }}
+            style={{ position: "absolute", left: x(column), top: -2, bottom: -2, width: 1, backgroundColor: color(column) }}
           />
         ) : null,
       )}
@@ -516,7 +562,7 @@ function Connectors({ ctx }: { ctx: Ctx }) {
           left: x(own),
           top: -2,
           width: 1,
-          backgroundColor: color,
+          backgroundColor: color(own),
           ...(last ? { height: CONNECT.elbowY + 2.5 } : { bottom: -2 }),
         }}
       />
@@ -528,7 +574,7 @@ function Connectors({ ctx }: { ctx: Ctx }) {
           top: CONNECT.elbowY - 0.5,
           width: tick,
           height: 1,
-          backgroundColor: color,
+          backgroundColor: color(own),
         }}
       />
     </>
@@ -707,6 +753,7 @@ function WorkspaceRow({
   open: boolean;
   ctx: Ctx;
 }) {
+  const { t } = useTranslation(sidebarText);
   const reference = ctx.workspaceRefs.get(node.key);
   const ws = useWorkspace(reference ?? node.key, (w) => ({
     label: w.title ?? w.name,
@@ -777,7 +824,12 @@ function WorkspaceRow({
   const renameModal = <RenameModal state={rename} folder={ws.folder} p={p} />;
   // A branch only says something when the row works in its own worktree; rows on the project's
   // checkout would all repeat the same branch.
+  const parentWorktree = node.parentWorktree?.differs ? node.parentWorktree : null;
   const branch = ws.kind === "worktree" ? ws.branch : null;
+  const label = t("openWorkspace", { name: ws.label });
+  const parentLabel = parentWorktree && (parentWorktree.branch
+    ? t("parentWorktreeBranch", { name: parentWorktree.name, branch: parentWorktree.branch })
+    : t("parentWorktreeName", { name: parentWorktree.name }));
   const meta: ReactNode[] = [];
   if (running > 0) meta.push(<Text key="run" style={{ color: p.running }}>하위 {running}개 실행 중</Text>);
   if (hidden > 0) meta.push(<Text key="hid">{hidden}개 접힘</Text>);
@@ -788,7 +840,7 @@ function WorkspaceRow({
     <Row
       depth={depth}
       active={active}
-      label={`Open ${ws.label}`}
+      label={parentLabel ? `${label}. ${parentLabel}` : label}
       onPress={open_}
       onLongPress={canArchive ? archive.begin : undefined}
       ctx={ctx}
@@ -830,19 +882,17 @@ function WorkspaceRow({
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
             {branch || meta.length > 0 ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                {branch ? <Icon name="GitBranch" size={12} color={p.muted} /> : null}
-                <Text numberOfLines={1} style={{ flexShrink: 1, color: p.muted, fontSize: 12 }}>
-                  {branch ?? ""}
-                  {meta.map((part, i) => (
-                    <Text key={i}>
-                      {branch || i > 0 ? " · " : ""}
-                      {part}
-                    </Text>
-                  ))}
-                </Text>
-              </View>
+              <MetaLine icon={branch ? "GitBranch" : undefined} p={p}>
+                {branch}
+                {meta.map((part, i) => (
+                  <Text key={i}>
+                    {branch || i > 0 ? " · " : ""}
+                    {part}
+                  </Text>
+                ))}
+              </MetaLine>
             ) : null}
+            {parentLabel ? <MetaLine p={p}>{parentLabel}</MetaLine> : null}
           </View>
         </>
       )}
@@ -861,10 +911,11 @@ function AgentRow({
   node: Extract<TreeNode, { kind: "agent" }>;
   depth: number;
   open: boolean;
-  /** The agent's workspace when it differs from its parent's; shown under the title. */
+  /** The workspace key used to look up the diff on the owning agent row. */
   away: string | null;
   ctx: Ctx;
 }) {
+  const { t } = useTranslation(sidebarText);
   const reference = ctx.agentRefs.get(node.key);
   const agent = useAgent(reference ?? node.key, (a) => ({
     label: a.title ?? a.provider,
@@ -885,6 +936,11 @@ function AgentRow({
   const { p } = ctx;
   const hidden = open ? 0 : countDescendants(node);
   const canArchive = agentBucket(agent) !== "running" && runningBelow === 0;
+  const parentWorktree = node.parentWorktree?.differs ? node.parentWorktree : null;
+  const label = t("openAgent", { name: agent.label });
+  const parentLabel = parentWorktree && (parentWorktree.branch
+    ? t("parentWorktreeBranch", { name: parentWorktree.name, branch: parentWorktree.branch })
+    : t("parentWorktreeName", { name: parentWorktree.name }));
   const modal = target ? (
     <ArchiveModal
       state={archive}
@@ -900,7 +956,7 @@ function AgentRow({
     <Row
       depth={depth}
       active={active}
-      label={`Open agent ${agent.label}`}
+      label={parentLabel ? `${label}. ${parentLabel}` : label}
       onPress={() => ctx.view.navigation.openAgent(reference)}
       onLongPress={canArchive ? archive.begin : undefined}
       ctx={ctx}
@@ -930,7 +986,7 @@ function AgentRow({
               )}
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
-
+            {parentLabel ? <MetaLine p={p}>{parentLabel}</MetaLine> : null}
           </View>
         </>
       )}
@@ -962,15 +1018,17 @@ function DiffStat({ workspaceKey, ctx }: { workspaceKey: string; ctx: Ctx }) {
   );
 }
 
-/** Project header: a chevron where Paseo draws the project tile, then the muted name. The
+/** Project header: an accent chevron where Paseo draws the project tile, then the project name. The
  *  project's connector line starts under the chevron. */
 function ProjectRow({
   reference,
   open,
+  accent,
   ctx,
 }: {
   reference: ProjectRef;
   open: boolean;
+  accent: string;
   ctx: Ctx;
 }) {
   const { t } = useTranslation(sidebarText);
@@ -1027,11 +1085,11 @@ function ProjectRow({
           <Icon
             name={ctx.reordering ? "GripVertical" : open ? "ChevronDown" : "ChevronRight"}
             size={14}
-            color={hovered ? p.foreground : p.muted}
+            color={accent}
           />
         </View>
         {/* Not selectable, so dragging the header never selects its name. */}
-        <Text numberOfLines={1} selectable={false} style={{ flex: 1, color: p.muted, fontSize: 14 }}>
+        <Text numberOfLines={1} selectable={false} style={{ flex: 1, color: p.foreground, fontSize: 14 }}>
           {name}
         </Text>
       </Pressable>

@@ -162,3 +162,60 @@ test("a child started from another project's session is a root of its own projec
     plugin: [{ "w:pluginWs": ["a:worker"] }],
   });
 });
+
+test("parent worktree context compares workspace identity rather than labels", () => {
+  const data = input({
+    workspaces: [["root", "p"], ["same", "p"], ["other", "p"]],
+    agents: [["parent", "root"], ["same-child", "same", "parent"], ["other-child", "other", "parent"]],
+  });
+  const workspaceContext = new Map([
+    ["root", { id: "1", hostId: "host", directory: "/repo/main", name: "shared", branch: "main" }],
+    ["same", { id: "2", hostId: "host", directory: "/repo/main/", name: "renamed", branch: "other" }],
+    ["other", { id: "3", hostId: "host", directory: "/repo/other", name: "shared", branch: "main" }],
+  ]);
+  const root = buildTree({ ...data, workspaceContext })[0].roots[0];
+  assert.deepEqual(root.children.map((node) => node.parentWorktree), [
+    { name: "shared", branch: "main", differs: false },
+    { name: "shared", branch: "main", differs: true },
+  ]);
+});
+
+test("cross-project parent context survives a collapsed root workspace", () => {
+  const data = input({
+    workspaces: [["child-ws", "child-project"]],
+    agents: [["child", "child-ws", "parent"]],
+  });
+  const workspaceContext = new Map([
+    ["parent-ws", { id: "p", hostId: "host", directory: "/parent", name: "Parent", branch: null }],
+    ["child-ws", { id: "c", hostId: "host", directory: "/child", name: "Child", branch: "feature" }],
+  ]);
+  const agentWorkspace = new Map(data.agentWorkspace).set("parent", "parent-ws");
+  const agentParent = new Map(data.agentParent).set("parent", null);
+  const [project] = buildTree({ ...data, agentWorkspace, agentParent, workspaceContext });
+  assert.deepEqual(shape(project.roots), ["w:child-ws"]);
+  assert.deepEqual(project.roots[0].parentWorktree, { name: "Parent", branch: null, differs: true });
+});
+
+test("missing parent context and cyclic parent edges never invent worktree context", () => {
+  const missing = input({ workspaces: [["w", "p"]], agents: [["child", "w", "gone"]] });
+  assert.equal(buildTree(missing)[0].roots[0].parentWorktree, null);
+  const cycle = input({ workspaces: [["w", "p"]], agents: [["a", "w", "b"], ["b", "w", "a"]] });
+  const workspaceContext = new Map([["w", { id: "w", hostId: "host", directory: "/w", name: "w", branch: null }]]);
+  const root = buildTree({ ...cycle, workspaceContext })[0].roots[0];
+  assert.equal(root.parentWorktree, null);
+  assert.equal(root.children.length, 1);
+  assert.deepEqual(root.children[0].parentWorktree, { name: "w", branch: null, differs: false });
+});
+
+test("same workspace key is the same worktree; matching paths on different hosts are not", () => {
+  const data = input({
+    workspaces: [["root", "p"], ["remote", "p"]],
+    agents: [["parent", "root"], ["local", "root", "parent"], ["remote-child", "remote", "parent"]],
+  });
+  const workspaceContext = new Map([
+    ["root", { id: "same-id", hostId: "one", directory: "/repo", name: "root", branch: null }],
+    ["remote", { id: "same-id", hostId: "two", directory: "/repo", name: "root", branch: null }],
+  ]);
+  const root = buildTree({ ...data, workspaceContext })[0].roots[0];
+  assert.deepEqual(root.children.map((node) => node.parentWorktree?.differs), [false, true]);
+});

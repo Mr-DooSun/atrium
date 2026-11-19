@@ -5,6 +5,21 @@
 // level of the tree. Top-level rows are workspaces whose agents have no parent, as in Paseo's
 // own sidebar.
 
+/** Public workspace snapshot fields, keyed by the host-qualified workspace ref key. */
+export interface WorkspaceContext {
+  readonly id: string;
+  readonly hostId: string;
+  readonly directory: string;
+  readonly name: string;
+  readonly branch: string | null;
+}
+
+export interface ParentWorktree {
+  readonly name: string;
+  readonly branch: string | null;
+  readonly differs: boolean;
+}
+
 export interface TreeInput {
   /** Workspace keys in display order. */
   readonly workspaces: readonly string[];
@@ -13,8 +28,11 @@ export interface TreeInput {
   readonly workspaceProject: ReadonlyMap<string, string>;
   /** The agent that created the workspace, when Paseo recorded one. */
   readonly workspaceParentAgent: ReadonlyMap<string, string | null>;
+  /** May include agents outside the display list, so their children retain parent context. */
   readonly agentWorkspace: ReadonlyMap<string, string>;
   readonly agentParent: ReadonlyMap<string, string | null>;
+  /** Global public workspace snapshots; omission keeps parent context unavailable. */
+  readonly workspaceContext?: ReadonlyMap<string, WorkspaceContext>;
 }
 
 export type TreeNode =
@@ -23,6 +41,8 @@ export type TreeNode =
       readonly key: string;
       /** Set when the workspace has exactly one root agent; its row stands for that agent. */
       readonly agentKey: string | null;
+      /** Parent context of the single root agent represented by this workspace row. */
+      readonly parentWorktree: ParentWorktree | null;
       readonly children: readonly TreeNode[];
     }
   | {
@@ -33,6 +53,8 @@ export type TreeNode =
        * number for the whole worktree, so only this agent's row carries it.
        */
       readonly ownsWorkspace: boolean;
+      /** The actual parent's workspace, even when that parent belongs to another project. */
+      readonly parentWorktree: ParentWorktree | null;
       readonly children: readonly TreeNode[];
     };
 
@@ -43,7 +65,9 @@ export interface ProjectTree {
 
 export function buildTree(input: TreeInput): ProjectTree[] {
   const { workspaces, agents, agentWorkspace, agentParent, workspaceParentAgent } = input;
-  const known = new Set(agents.filter((a) => agentWorkspace.has(a)));
+  const displayedWorkspaces = new Set(workspaces);
+  // Global context can include hidden workspaces; their agents must not capture visible rows.
+  const known = new Set(agents.filter((a) => displayedWorkspaces.has(agentWorkspace.get(a) ?? "")));
   const projectOfWorkspace = (workspace: string | undefined) =>
     workspace ? (input.workspaceProject.get(workspace) ?? null) : null;
   const projectOfAgent = (agent: string) => projectOfWorkspace(agentWorkspace.get(agent));
@@ -104,10 +128,41 @@ export function buildTree(input: TreeInput): ProjectTree[] {
       firstInWorkspace.set(workspace, agent);
     }
   }
+  function parentWorktree(agent: string): ParentWorktree | null {
+    const parent = agentParent.get(agent);
+    if (!parent || parent === agent) return null;
+    // For displayed parents in the same project, respect the exact edge the nesting guards kept.
+    if (known.has(parent) && sameProject(agent, parent)) {
+      if (parentOf.get(agent) !== parent) return null;
+    } else {
+      // Context may cross project/display boundaries; reject cycles there without adding rows.
+      const seen = new Set([agent]);
+      let current: string | null | undefined = parent;
+      while (current) {
+        if (seen.has(current)) return null;
+        seen.add(current);
+        current = agentParent.get(current);
+      }
+    }
+    const parentWorkspace = agentWorkspace.get(parent);
+    const childWorkspace = agentWorkspace.get(agent);
+    if (!parentWorkspace || !childWorkspace) return null;
+    const context = input.workspaceContext?.get(parentWorkspace);
+    if (!context) return null;
+    const childContext = input.workspaceContext?.get(childWorkspace);
+    // Names and branches can coincide across different checkouts. Identity and paths decide.
+    const same = parentWorkspace === childWorkspace || (childContext !== undefined &&
+      context.hostId === childContext.hostId && (context.id === childContext.id ||
+        (context.directory.length > 0 && childContext.directory.length > 0 &&
+          directoryKey(context.directory) === directoryKey(childContext.directory))));
+    return { name: context.name, branch: context.branch, differs: !same };
+  }
+
   const agentNode = (agent: string): TreeNode => ({
     kind: "agent",
     key: agent,
     ownsWorkspace: firstInWorkspace.get(agentWorkspace.get(agent)!) === agent,
+    parentWorktree: parentWorktree(agent),
     children: childrenOfAgent(agent),
   });
 
@@ -137,6 +192,7 @@ export function buildTree(input: TreeInput): ProjectTree[] {
         kind: "workspace",
         key: workspace,
         agentKey: roots[0],
+        parentWorktree: parentWorktree(roots[0]),
         children: childrenOfAgent(roots[0]),
       };
     }
@@ -144,6 +200,7 @@ export function buildTree(input: TreeInput): ProjectTree[] {
       kind: "workspace",
       key: workspace,
       agentKey: null,
+      parentWorktree: null,
       children: groupByWorkspace(roots).map(agentNode),
     };
   }
@@ -168,4 +225,9 @@ function push(map: Map<string, string[]>, key: string, value: string) {
   const list = map.get(key);
   if (list) list.push(value);
   else map.set(key, [value]);
+}
+
+/** SDK directory paths are absolute; trailing separators do not create a different checkout. */
+function directoryKey(directory: string): string {
+  return directory.replace(/\/+$/, "") || "/";
 }

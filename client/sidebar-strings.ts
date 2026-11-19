@@ -4,6 +4,10 @@ import { defineTranslations } from "@getpaseo/plugin/client";
 
 const en = {
   startChat: "Start a new chat",
+  openAgent: "Open agent {{name}}",
+  openWorkspace: "Open workspace {{name}}",
+  parentWorktreeName: "Parent workspace {{name}}",
+  parentWorktreeBranch: "Parent workspace {{name}}, branch {{branch}}",
   remove: "Remove from sidebar",
   removeTitle: "Remove this project?",
   removeBody: "Its {{n}} sessions are archived. Files on disk stay. Add the folder in Paseo again to bring it back.",
@@ -24,6 +28,10 @@ const en = {
 
 const zhCN = {
   startChat: "开始新对话",
+  openAgent: "打开代理 {{name}}",
+  openWorkspace: "打开工作区 {{name}}",
+  parentWorktreeName: "父级工作区 {{name}}",
+  parentWorktreeBranch: "父级工作区 {{name}}，分支 {{branch}}",
   remove: "从侧边栏移除",
   removeTitle: "移除此项目？",
   removeBody: "其中 {{n}} 个会话将被归档。磁盘上的文件会保留。在 Paseo 中重新添加该文件夹即可恢复。",
@@ -44,6 +52,10 @@ const zhCN = {
 
 const ptBR = {
   startChat: "Iniciar novo chat",
+  openAgent: "Abrir agente {{name}}",
+  openWorkspace: "Abrir espaço de trabalho {{name}}",
+  parentWorktreeName: "Espaço de trabalho do agente pai {{name}}",
+  parentWorktreeBranch: "Espaço de trabalho do agente pai {{name}}, branch {{branch}}",
   remove: "Remover da barra lateral",
   removeTitle: "Remover este projeto?",
   removeBody: "Suas {{n}} sessões serão arquivadas. Os arquivos no disco permanecem. Adicione a pasta no Paseo de novo para trazê-lo de volta.",
@@ -67,6 +79,10 @@ export const sidebarText = defineTranslations({
     en,
     ko: {
       startChat: "새 대화 시작",
+      openAgent: "에이전트 {{name}} 열기",
+      openWorkspace: "워크스페이스 {{name}} 열기",
+      parentWorktreeName: "부모 워크스페이스 {{name}}",
+      parentWorktreeBranch: "부모 워크스페이스 {{name}}, 브랜치 {{branch}}",
       remove: "사이드바에서 제거",
       removeTitle: "이 프로젝트를 제거할까요?",
       removeBody: "세션 {{n}}개가 보관됩니다. 디스크의 파일은 그대로 남습니다. Paseo에서 폴더를 다시 추가하면 돌아옵니다.",
@@ -86,6 +102,10 @@ export const sidebarText = defineTranslations({
     },
     ja: {
       startChat: "新しいチャットを開始",
+      openAgent: "エージェント {{name}} を開く",
+      openWorkspace: "ワークスペース {{name}} を開く",
+      parentWorktreeName: "親ワークスペース {{name}}",
+      parentWorktreeBranch: "親ワークスペース {{name}}、ブランチ {{branch}}",
       remove: "サイドバーから削除",
       removeTitle: "このプロジェクトを削除しますか？",
       removeBody: "{{n}} 件のセッションがアーカイブされます。ディスク上のファイルは残ります。Paseo でフォルダを再度追加すると戻せます。",
@@ -107,6 +127,10 @@ export const sidebarText = defineTranslations({
     zh: zhCN,
     es: {
       startChat: "Iniciar un chat nuevo",
+      openAgent: "Abrir agente {{name}}",
+      openWorkspace: "Abrir espacio de trabajo {{name}}",
+      parentWorktreeName: "Espacio de trabajo del agente padre {{name}}",
+      parentWorktreeBranch: "Espacio de trabajo del agente padre {{name}}, rama {{branch}}",
       remove: "Quitar de la barra lateral",
       removeTitle: "¿Quitar este proyecto?",
       removeBody: "Sus {{n}} sesiones se archivan. Los archivos en disco se conservan. Vuelve a añadir la carpeta en Paseo para recuperarlo.",
@@ -126,6 +150,10 @@ export const sidebarText = defineTranslations({
     },
     fr: {
       startChat: "Démarrer une discussion",
+      openAgent: "Ouvrir l’agent {{name}}",
+      openWorkspace: "Ouvrir l’espace de travail {{name}}",
+      parentWorktreeName: "Espace de travail de l’agent parent {{name}}",
+      parentWorktreeBranch: "Espace de travail de l’agent parent {{name}}, branche {{branch}}",
       remove: "Retirer de la barre latérale",
       removeTitle: "Retirer ce projet ?",
       removeBody: "Ses {{n}} sessions sont archivées. Les fichiers sur le disque restent. Ajoutez à nouveau le dossier dans Paseo pour le retrouver.",
@@ -147,6 +175,10 @@ export const sidebarText = defineTranslations({
     pt: ptBR,
     ru: {
       startChat: "Начать новый чат",
+      openAgent: "Открыть агента {{name}}",
+      openWorkspace: "Открыть рабочую область {{name}}",
+      parentWorktreeName: "Рабочая область родительского агента {{name}}",
+      parentWorktreeBranch: "Рабочая область родительского агента {{name}}, ветка {{branch}}",
       remove: "Убрать с боковой панели",
       removeTitle: "Убрать этот проект?",
       removeBody: "Сессии ({{n}}) будут архивированы. Файлы на диске останутся. Чтобы вернуть проект, снова добавьте папку в Paseo.",
@@ -166,6 +198,10 @@ export const sidebarText = defineTranslations({
     },
     ar: {
       startChat: "بدء محادثة جديدة",
+      openAgent: "فتح الوكيل {{name}}",
+      openWorkspace: "فتح مساحة العمل {{name}}",
+      parentWorktreeName: "مساحة عمل الوكيل الأب {{name}}",
+      parentWorktreeBranch: "مساحة عمل الوكيل الأب {{name}}، الفرع {{branch}}",
       remove: "إزالة من الشريط الجانبي",
       removeTitle: "إزالة هذا المشروع؟",
       removeBody: "ستتم أرشفة جلساته ({{n}}). تبقى الملفات على القرص. أضف المجلد في Paseo مرة أخرى لاستعادته.",

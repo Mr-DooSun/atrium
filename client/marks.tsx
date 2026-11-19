@@ -1,6 +1,6 @@
 // Row marks shared by the tree and the free chat section.
 import { useEffect, useRef, type ReactNode } from "react";
-import { Animated, Easing, Platform, View } from "react-native";
+import { Animated, Easing, Platform, Text, View } from "react-native";
 import type { PluginAgentSnapshot } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { TITLE_LINE, type Bucket, type Palette } from "./look";
@@ -85,6 +85,18 @@ export function ProviderMark({ provider, p }: { provider: string; p: Palette }) 
       ) : (
         <Icon name="Bot" size={14} color={p.muted} />
       )}
+    </View>
+  );
+}
+
+/** Secondary row content uses a single line, even at deep tree indents. */
+export function MetaLine({ icon, p, children }: { icon?: string; p: Palette; children: ReactNode }) {
+  return (
+    <View style={{ flexDirection: "row", minWidth: 0, alignItems: "center", gap: 4 }}>
+      {icon ? <Icon name={icon} size={12} color={p.muted} /> : null}
+      <Text numberOfLines={1} selectable={false} style={{ flexShrink: 1, minWidth: 0, color: p.muted, fontSize: 12 }}>
+        {children}
+      </Text>
     </View>
   );
 }

@@ -11,8 +11,8 @@ export type Bucket = "needs_input" | "failed" | "running" | "attention" | "done"
 export const TITLE_LINE = 20;
 /** Paseo's own row rhythm. gap: between rows; lineGap: between a row's title and meta lines. */
 export const ROW = { minHeight: 36, paddingVertical: 8, gap: 2, lineGap: 4 } as const;
-/** Project header: gap before its first session, and between project blocks. */
-export const PROJECT = { gapBelow: 4, blockGap: 12 } as const;
+/** Gap after the header, and spacing and divider inset between project blocks. */
+export const PROJECT = { gapBelow: 4, blockGap: 12, dividerInset: 8 } as const;
 /** rail: where depth-0 rows start (Paseo's rowIndented); step: each nesting level. */
 /** Every level, the first included, sits one equal step further in than its parent. */
 export const INDENT = { step: 24 } as const;
@@ -34,7 +34,42 @@ export function slotX(depth: number): number {
   return connectorX(depth + 1) - 8;
 }
 
-type Colors = PluginSidebarViewProps["theme"]["colors"];
+type Theme = PluginSidebarViewProps["theme"];
+type Colors = Theme["colors"];
+
+export interface ProjectAppearance {
+  accent: string;
+  rail: string;
+  divider: string;
+}
+
+const PROJECT_ACCENTS = [
+  { light: "#a12646", dark: "#ffa1b5" },
+  { light: "#a33827", dark: "#ffa68e" },
+  { light: "#87511b", dark: "#f7bb78" },
+  { light: "#726017", dark: "#e3ca6b" },
+  { light: "#53651c", dark: "#c2d57e" },
+  { light: "#226944", dark: "#8adeae" },
+  { light: "#126967", dark: "#83dad4" },
+  { light: "#19647f", dark: "#85d3f0" },
+  { light: "#2b50a0", dark: "#a0beff" },
+  { light: "#5b40ab", dark: "#c5b5ff" },
+  { light: "#7e3a9b", dark: "#dfadf7" },
+  { light: "#943670", dark: "#f6aad9" },
+] as const;
+
+/** Derive a project color from its root folder key, independent of display order and session state. */
+export function projectAppearance(projectFolderKey: string, theme: Theme): ProjectAppearance {
+  // FNV-1a over the folder key's UTF-16 code units.
+  let hash = 2166136261;
+  for (let i = 0; i < projectFolderKey.length; i++) {
+    hash = Math.imul(hash ^ projectFolderKey.charCodeAt(i), 16777619);
+  }
+
+  const colors = PROJECT_ACCENTS[(hash >>> 0) % PROJECT_ACCENTS.length];
+  const accent = isDark(theme.colors.surface0) ? colors.dark : colors.light;
+  return { accent, rail: `${accent}a6`, divider: theme.colors.border };
+}
 
 export interface Palette {
   background: string;
