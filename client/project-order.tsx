@@ -1,48 +1,71 @@
-// Hand-set project order: the saved order from the daemon, the bar shown while reordering, and the
+// Hand-set order of projects and sessions: the saved order from the daemon, the bar shown while reordering, and the
 // long-press menu of compact layouts, where a long press used to remove the project directly.
 import { useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
-import { getProjectOrder, setProjectOrder } from "../shared/project-order";
+import { getProjectOrder, setNodeOrder, setProjectOrder, type NodeOrders } from "../shared/project-order";
 import { ROW, type Palette } from "./look";
 import { sidebarText } from "./sidebar-strings";
 
-const KEY = ["projectOrder"] as const;
+const KEY = ["projectOrder", 2] as const;
 const NONE: readonly string[] = [];
+const NO_NODES: NodeOrders = {};
+
+interface Saved {
+  order: readonly string[];
+  nodes: NodeOrders;
+}
 
 export interface ProjectOrder {
   /** Project root paths in the saved order; empty for the default order. */
   saved: readonly string[];
+  /** Per parent, its children's keys in the saved order. */
+  nodes: NodeOrders;
   save(order: readonly string[]): void;
+  saveNodes(group: string, order: readonly string[]): void;
 }
 
 export function useProjectOrder(): ProjectOrder {
   const get = useRpc(getProjectOrder);
   const set = useRpc(setProjectOrder);
+  const setNodes = useRpc(setNodeOrder);
   const queryClient = useQueryClient();
   const toast = useToast();
   const { t } = useTranslation(sidebarText);
   const query = useQuery({
     queryKey: KEY,
-    queryFn: () => get({}).then((r) => r.order),
+    queryFn: (): Promise<Saved> => get({}),
     staleTime: 30_000,
     retry: 2,
   });
   // Shown at once; put back if the daemon does not take it.
-  const save = useCallback(
-    (order: readonly string[]) => {
-      const previous = queryClient.getQueryData<readonly string[]>(KEY);
-      queryClient.setQueryData(KEY, [...order]);
-      set({ order: [...order] }).catch(() => {
+  const optimistic = useCallback(
+    (change: (current: Saved) => Saved, send: () => Promise<unknown>) => {
+      const previous = queryClient.getQueryData<Saved>(KEY);
+      queryClient.setQueryData<Saved>(KEY, change(previous ?? { order: NONE, nodes: NO_NODES }));
+      send().catch(() => {
         queryClient.setQueryData(KEY, previous);
         toast.error(t("orderFailed"));
       });
     },
-    [queryClient, set, toast, t],
+    [queryClient, toast, t],
   );
-  return { saved: query.data ?? NONE, save };
+  const save = useCallback(
+    (order: readonly string[]) =>
+      optimistic((current) => ({ ...current, order: [...order] }), () => set({ order: [...order] })),
+    [optimistic, set],
+  );
+  const saveNodes = useCallback(
+    (group: string, order: readonly string[]) =>
+      optimistic(
+        (current) => ({ ...current, nodes: { ...current.nodes, [group]: [...order] } }),
+        () => setNodes({ group, order: [...order] }),
+      ),
+    [optimistic, setNodes],
+  );
+  return { saved: query.data?.order ?? NONE, nodes: query.data?.nodes ?? NO_NODES, save, saveNodes };
 }
 
 /** Pinned above the projects while reordering. */
