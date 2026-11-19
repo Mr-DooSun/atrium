@@ -1,0 +1,175 @@
+// Hand-set project order: the saved order from the daemon, the bar shown while reordering, and the
+// long-press menu of compact layouts, where a long press used to remove the project directly.
+import { useCallback } from "react";
+import { Pressable, Text, View } from "react-native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRpc, useTranslation } from "@getpaseo/plugin/client";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
+import { getProjectOrder, setProjectOrder } from "../shared/project-order";
+import { ROW, type Palette } from "./look";
+import { sidebarText } from "./sidebar-strings";
+
+const KEY = ["projectOrder"] as const;
+const NONE: readonly string[] = [];
+
+export interface ProjectOrder {
+  /** Project root paths in the saved order; empty for the default order. */
+  saved: readonly string[];
+  save(order: readonly string[]): void;
+}
+
+export function useProjectOrder(): ProjectOrder {
+  const get = useRpc(getProjectOrder);
+  const set = useRpc(setProjectOrder);
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const { t } = useTranslation(sidebarText);
+  const query = useQuery({
+    queryKey: KEY,
+    queryFn: () => get({}).then((r) => r.order),
+    staleTime: 30_000,
+    retry: 2,
+  });
+  // Shown at once; put back if the daemon does not take it.
+  const save = useCallback(
+    (order: readonly string[]) => {
+      const previous = queryClient.getQueryData<readonly string[]>(KEY);
+      queryClient.setQueryData(KEY, [...order]);
+      set({ order: [...order] }).catch(() => {
+        queryClient.setQueryData(KEY, previous);
+        toast.error(t("orderFailed"));
+      });
+    },
+    [queryClient, set, toast, t],
+  );
+  return { saved: query.data ?? NONE, save };
+}
+
+/** Pinned above the projects while reordering. */
+export function ReorderBar({ onDone, onReset, canReset, p }: { onDone(): void; onReset(): void; canReset: boolean; p: Palette }) {
+  const { t } = useTranslation(sidebarText);
+  return (
+    <View
+      style={{
+        minHeight: ROW.minHeight,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingLeft: 8,
+        paddingRight: 4,
+        marginBottom: 6,
+      }}
+    >
+      <Icon name="ArrowUpDown" size={14} color={p.muted} />
+      <Text numberOfLines={1} style={{ flex: 1, color: p.muted, fontSize: 13 }}>
+        {t("reordering")}
+      </Text>
+      {canReset ? <BarButton label={t("resetOrder")} onPress={onReset} p={p} /> : null}
+      <BarButton label={t("done")} onPress={onDone} p={p} primary />
+    </View>
+  );
+}
+
+function BarButton({ label, onPress, p, primary }: { label: string; onPress(): void; p: Palette; primary?: boolean }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={4}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 6,
+        backgroundColor: primary ? p.foreground : pressed ? p.pressed : "transparent",
+        opacity: primary && pressed ? 0.85 : 1,
+      })}
+    >
+      <Text style={{ color: primary ? p.background : p.muted, fontSize: 12, fontWeight: primary ? "600" : "400" }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** One place up or down, beside a project header while reordering. */
+export function MoveButton({ up, disabled, onPress, p }: { up: boolean; disabled: boolean; onPress(): void; p: Palette }) {
+  const { t } = useTranslation(sidebarText);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={up ? t("moveUp") : t("moveDown")}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      hitSlop={4}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: pressed ? p.pressed : "transparent",
+        opacity: disabled ? 0.3 : 1,
+      })}
+    >
+      <Icon name={up ? "ChevronUp" : "ChevronDown"} size={14} color={p.foreground} />
+    </Pressable>
+  );
+}
+
+/** Compact layouts have no hover: a long press on a project header offers these two. */
+export function ProjectMenu({
+  name,
+  open,
+  onClose,
+  onReorder,
+  onRemove,
+  p,
+}: {
+  name: string;
+  open: boolean;
+  onClose(): void;
+  onReorder(): void;
+  onRemove(): void;
+  p: Palette;
+}) {
+  const { t } = useTranslation(sidebarText);
+  const item = (icon: string, label: string, onPress: () => void, danger = false) => (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={() => {
+        onClose();
+        onPress();
+      }}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 10,
+        borderRadius: 8,
+        backgroundColor: pressed ? p.pressed : "transparent",
+      })}
+    >
+      <Icon name={icon} size={16} color={danger ? p.danger : p.foreground} />
+      <Text style={{ color: danger ? p.danger : p.foreground, fontSize: 14 }}>{label}</Text>
+    </Pressable>
+  );
+  return (
+    <Modal
+      title={name}
+      icon={<Icon name="Folder" size={16} color={p.foreground} />}
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <Modal.Content>
+        {item("ArrowUpDown", t("reorder"), onReorder)}
+        {item("FolderX", t("remove"), onRemove, true)}
+      </Modal.Content>
+    </Modal>
+  );
+}

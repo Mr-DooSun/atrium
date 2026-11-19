@@ -1,0 +1,9 @@
+{
+  "id": "paseo-nested-agents",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.16.1"
+  },
+  "name": "Nested agents & token monitor",
+  "description": "Organizes agents in a workspace hierarchy, and extends Paseo's usage panel with additional Claude and Codex accounts on the host."
+}
