@@ -5,6 +5,17 @@ All notable changes to this project are recorded here. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0, bug fixes go in a patch release (0.1.x), and new
 features or behavior changes go in a minor release (0.2.0).
 
+## [Unreleased]
+
+### Added
+
+- Panes screen: open many agent chats side by side. Only the panes near the viewport are mounted and subscribed, so there is no fixed limit on how many can be open.
+- Drag a session out of the sidebar to open it as a pane. If the panes screen is closed, it opens with the session added. Sessions can also be opened from a hover button, the long-press menu on mobile, and the Command Center.
+- Parent and child sessions are grouped: they sit next to each other, parents first, share a color and a connecting line, and move together. Dropping a parent offers to add its sub-agents that are not open yet.
+- A composer in each pane. A message sent while the agent is working is added to the current turn instead of interrupting it, and Enter during IME composition (Korean, Japanese, Chinese) does not send.
+- Reorder panes by dragging the grip in the pane header, resize panes from their right edge (double-click resets), and keep both across restarts.
+- Plugin RPCs `chat.timelines` (live timelines for many agents), `chat.timeline.older` (older history) and `chat.links` (parent and child links).
+
 ## [0.1.0] - 2026-11-20
 
 First public release.

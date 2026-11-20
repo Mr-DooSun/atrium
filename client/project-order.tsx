@@ -1,12 +1,12 @@
 // Hand-set order of projects and sessions: the saved order from the daemon, the bar shown while reordering, and the
 // long-press menu of compact layouts, where a long press used to remove the project directly.
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { getProjectOrder, setNodeOrder, setProjectOrder, type NodeOrders } from "../shared/project-order";
-import { ROW, type Palette } from "./look";
+import { ROW, TITLE_LINE, type Palette } from "./look";
 import { sidebarText } from "./sidebar-strings";
 
 const KEY = ["projectOrder", 2] as const;
@@ -192,6 +192,122 @@ export function ProjectMenu({
       <Modal.Content>
         {item("ArrowUpDown", t("reorder"), onReorder)}
         {item("FolderX", t("remove"), onRemove, true)}
+      </Modal.Content>
+    </Modal>
+  );
+}
+
+// ── Session → pane drag ────────────────────────────────────────────────
+
+/** How far past the sidebar's edge the pointer must go to start a pane drag, and how far back it
+ *  must come to return to reordering (the gap keeps a pointer on the edge from flickering). */
+export const PANE_DRAG_ENTER = 12;
+/** Horizontal travel that starts a pane drag even inside the sidebar (a very wide one). */
+export const PANE_DRAG_FAR = 220;
+export const PANE_DRAG_FAR_EXIT = 180;
+
+/** Whether `x` is beyond the sidebar's edges by more than `margin`; false when the edges are unknown. */
+export function outsideSidebar(x: number, left: number, right: number, margin = 0): boolean {
+  return right > left && (x > right + margin || x < left - margin);
+}
+
+/**
+ * Whether a session drag at `x` is a drag toward the panes rather than a reorder. Pure: `left` and
+ * `right` are the sidebar's edges on the page (right <= left when unknown), `startX` is where the
+ * press began, `active` whether the gesture already is a pane drag (it then leaves more slowly).
+ * `dropZones`: whether the panes screen is mounted. With it, leaving the sidebar or travelling far
+ * sideways counts; without it only leaving the sidebar does (a drop then opens the panes screen).
+ */
+export function isPaneDrag(args: {
+  x: number;
+  startX: number;
+  left: number;
+  right: number;
+  active: boolean;
+  dropZones: boolean;
+}): boolean {
+  if (outsideSidebar(args.x, args.left, args.right, args.active ? 0 : PANE_DRAG_ENTER)) return true;
+  if (!args.dropZones) return false;
+  return Math.abs(args.x - args.startX) > (args.active ? PANE_DRAG_FAR_EXIT : PANE_DRAG_FAR);
+}
+
+/** Hover button on a session row: opens it in the panes screen. */
+export function PanesButton({ onPress, p }: { onPress(): void; p: Palette }) {
+  const [hovered, setHovered] = useState(false);
+  const { t } = useTranslation(sidebarText);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t("openInPanes")}
+      hitSlop={6}
+      onPress={onPress}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      style={{
+        width: 20,
+        height: TITLE_LINE,
+        borderRadius: 5,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: hovered ? p.pressed : "transparent",
+      }}
+    >
+      <Icon name="PanelRightOpen" size={13} color={hovered ? p.foreground : p.muted} />
+    </Pressable>
+  );
+}
+
+/** Compact layouts have no hover: a long press on a session row offers these. */
+export function SessionMenu({
+  name,
+  open,
+  onClose,
+  onOpenInPanes,
+  onArchive,
+  p,
+}: {
+  name: string;
+  open: boolean;
+  onClose(): void;
+  onOpenInPanes?: () => void;
+  onArchive?: () => void;
+  p: Palette;
+}) {
+  const { t } = useTranslation(sidebarText);
+  const item = (icon: string, label: string, onPress: () => void) => (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={() => {
+        onClose();
+        onPress();
+      }}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 10,
+        borderRadius: 8,
+        backgroundColor: pressed ? p.pressed : "transparent",
+      })}
+    >
+      <Icon name={icon} size={16} color={p.foreground} />
+      <Text style={{ color: p.foreground, fontSize: 14 }}>{label}</Text>
+    </Pressable>
+  );
+  return (
+    <Modal
+      title={name}
+      icon={<Icon name="MessageSquare" size={16} color={p.foreground} />}
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <Modal.Content>
+        {onOpenInPanes ? item("PanelRightOpen", t("openInPanes"), onOpenInPanes) : null}
+        {onArchive ? item("Archive", t("archive"), onArchive) : null}
       </Modal.Content>
     </Modal>
   );

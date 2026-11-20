@@ -29,7 +29,15 @@ import {
 } from "./archive";
 import { RenameButton, RenameModal, useRename } from "./rename";
 import { RemoveProjectModal, useRemoveProject } from "./remove-project";
-import { MoveButton, ProjectMenu, ReorderBar, useProjectOrder } from "./project-order";
+import { MoveButton, PanesButton, ProjectMenu, ReorderBar, SessionMenu, isPaneDrag, outsideSidebar, useProjectOrder } from "./project-order";
+import {
+  beginSessionDrag,
+  endSessionDrag,
+  hasDropZones,
+  moveSessionDrag,
+  openInPanes,
+  type SessionDragPayload,
+} from "./panes/drop-bus";
 import { applyOrder, dropIndex, move, orderTree, placeAt, rootsGroup, type BlockLayout } from "../shared/project-order";
 import { sidebarText } from "./sidebar-strings";
 import { usePendingPermissions } from "./pending-permissions";
@@ -95,6 +103,10 @@ interface Ctx {
   guard<A extends unknown[]>(fn: (...args: A) => void): (...args: A) => void;
   /** The group a project's top rows are ordered in. */
   rootGroup(projectKey: string): string;
+  /** The session being dragged toward the panes screen; null when none is. */
+  paneDrag: DragTarget | null;
+  /** A session row says which session it stands for, so dragging it out can carry it. */
+  setPayload(key: string, payload: SessionDragPayload | null): void;
 }
 
 /** Group keys → member keys, plus a key → ref lookup. */
@@ -273,6 +285,41 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     setDrag({ group: a.target.group, key: a.target.key, dy: offset(a) });
   }, []);
   const pressedRef = useRef<DragTarget | null>(null);
+  // Pane drag: a session dragged out of the sidebar toward the panes screen. While it lasts the
+  // reorder preview is off; the row stays in place, dimmed.
+  const payloads = useRef(new Map<string, SessionDragPayload>());
+  const setPayload = useCallback((key: string, payload: SessionDragPayload | null) => {
+    if (payload) payloads.current.set(key, payload);
+    else payloads.current.delete(key);
+  }, []);
+  const [paneDrag, setPaneDrag] = useState<DragTarget | null>(null);
+  const paneMode = useRef(false);
+  const frameBox = useRef({ left: 0, right: 0 });
+  const measureFrame = useCallback(() => {
+    frameRef.current?.measureInWindow((x, _y, w) => {
+      frameBox.current = { left: x, right: x + w };
+    });
+  }, []);
+  /** Ends a running pane drag: dropped at the point, or cancelled with null coordinates. */
+  const panePayload = useRef<SessionDragPayload | null>(null);
+  const endPane = useCallback((at: { x: number; y: number } | null) => {
+    if (!paneMode.current) return;
+    paneMode.current = false;
+    setPaneDrag(null);
+    dragEndedAt.current = Date.now();
+    const payload = panePayload.current;
+    panePayload.current = null;
+    endSessionDrag(at?.x ?? null, at?.y ?? null)
+      .then((accepted) => {
+        // No pane area took it: released outside the sidebar, the panes screen opens with it.
+        // Released back inside the sidebar (or cancelled), nothing happens.
+        if (!accepted && at && payload && outsideSidebar(at.x, frameBox.current.left, frameBox.current.right)) {
+          openInPanes(payload);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => () => endPane(null), [endPane]);
   const compactRef = useRef(view.layout.compact);
   compactRef.current = view.layout.compact;
   const pressed = useCallback(
@@ -358,8 +405,44 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
    *  flick), so the item would land short of the pointer. */
   const pressY = useRef(0);
   const lastY = useRef(0);
-  const latestDrag = useRef({ dragMove, dragEnd });
-  latestDrag.current = { dragMove, dragEnd };
+  const pressX = useRef(0);
+  const lastX = useRef(0);
+  const latestDrag = useRef({ dragMove, dragEnd, endPane });
+  latestDrag.current = { dragMove, dragEnd, endPane };
+  /** One step of the gesture: a reorder move, or a pane drag once the pointer leaves the sidebar. */
+  const step = (target: DragTarget) => {
+    const { dragMove, dragEnd, endPane } = latestDrag.current;
+    const payload = target.group === PROJECTS ? undefined : payloads.current.get(target.key);
+    if (payload) {
+      const toward = isPaneDrag({
+        x: lastX.current,
+        startX: pressX.current,
+        left: frameBox.current.left,
+        right: frameBox.current.right,
+        active: paneMode.current,
+        dropZones: hasDropZones(),
+      });
+      if (toward && !paneMode.current) {
+        // Back to place, no reorder on release; the panes screen takes the gesture from here.
+        dragEnd(target, null);
+        paneMode.current = true;
+        panePayload.current = payload;
+        setPaneDrag(target);
+        beginSessionDrag(payload);
+      } else if (!toward && paneMode.current) {
+        endPane(null);
+      }
+      if (paneMode.current) {
+        moveSessionDrag(lastX.current, lastY.current);
+        return;
+      }
+    }
+    dragMove(target, lastY.current - pressY.current, lastY.current);
+  };
+  const stepRef = useRef(step);
+  stepRef.current = step;
+  const measureFrameRef = useRef(measureFrame);
+  measureFrameRef.current = measureFrame;
   const listResponder = useMemo(
     () =>
       PanResponder.create({
@@ -368,30 +451,44 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
         onStartShouldSetPanResponderCapture: (e) => {
           pressedRef.current = null;
           pressY.current = lastY.current = e.nativeEvent.pageY;
+          pressX.current = lastX.current = e.nativeEvent.pageX;
+          measureFrameRef.current();
           return false;
         },
-        onMoveShouldSetPanResponderCapture: (_, g) =>
-          !compactRef.current &&
-          pressedRef.current !== null &&
-          Math.abs(g.dy) > 6 &&
-          Math.abs(g.dy) > Math.abs(g.dx),
+        onMoveShouldSetPanResponderCapture: (_, g) => {
+          const target = pressedRef.current;
+          if (compactRef.current || target === null) return false;
+          if (Math.abs(g.dy) > 6 && Math.abs(g.dy) > Math.abs(g.dx)) return true;
+          // A sideways start on a session can only be a pull toward the panes.
+          return target.group !== PROJECTS && Math.abs(g.dx) > 6;
+        },
         onPanResponderGrant: (e) => {
           lastY.current = e.nativeEvent.pageY;
-          if (pressedRef.current) latestDrag.current.dragMove(pressedRef.current, lastY.current - pressY.current, lastY.current);
+          lastX.current = e.nativeEvent.pageX;
+          if (pressedRef.current) stepRef.current(pressedRef.current);
         },
         onPanResponderMove: (e) => {
           lastY.current = e.nativeEvent.pageY;
-          if (pressedRef.current) latestDrag.current.dragMove(pressedRef.current, lastY.current - pressY.current, lastY.current);
+          lastX.current = e.nativeEvent.pageX;
+          if (pressedRef.current) stepRef.current(pressedRef.current);
         },
         onPanResponderRelease: () => {
           const target = pressedRef.current;
           pressedRef.current = null;
+          if (paneMode.current) {
+            latestDrag.current.endPane({ x: lastX.current, y: lastY.current });
+            return;
+          }
           // The release lands where the last move left the pointer.
           if (target) latestDrag.current.dragEnd(target, lastY.current - pressY.current);
         },
         onPanResponderTerminate: () => {
           const target = pressedRef.current;
           pressedRef.current = null;
+          if (paneMode.current) {
+            latestDrag.current.endPane(null);
+            return;
+          }
           if (target) latestDrag.current.dragEnd(target, null);
         },
         onPanResponderTerminationRequest: () => false,
@@ -433,6 +530,8 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     pressed,
     guard,
     rootGroup,
+    paneDrag,
+    setPayload,
   };
 
   return (
@@ -734,8 +833,9 @@ function Row({
   const { p } = ctx;
   const target = useContext(DragTargetContext);
   const dragSource = useDragSource(target, ctx);
+  const toPanes = target !== null && ctx.paneDrag?.group === target.group && ctx.paneDrag.key === target.key;
   return (
-    <View {...dragSource}>
+    <View {...dragSource} style={toPanes ? { opacity: 0.5 } : undefined}>
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -761,9 +861,38 @@ function Row({
     >
       <Connectors ctx={ctx} />
       {children(hovered)}
+      {toPanes ? <PaneDragCue ctx={ctx} /> : null}
     </Pressable>
     </View>
   );
+}
+
+/** On the row being pulled toward the panes: an icon and a hint, over the row's right end. */
+function PaneDragCue({ ctx }: { ctx: Ctx }) {
+  const { t } = useTranslation(sidebarText);
+  return (
+    <View
+      pointerEvents="none"
+      accessibilityLabel={t("paneDrag")}
+      style={{ position: "absolute", right: 8, top: 0, bottom: 0, justifyContent: "center" }}
+    >
+      <Icon name="PanelRightOpen" size={14} color={ctx.p.foreground} />
+    </View>
+  );
+}
+
+/** Tells the sidebar which session a row stands for, so a drag out of it can carry the session. */
+function useSessionPayload(key: string, agent: AgentRef | null | undefined, title: string | undefined, ctx: Ctx) {
+  const { setPayload } = ctx;
+  const payload = useMemo(
+    (): SessionDragPayload | null => (agent ? { kind: "atrium.session", agent, title } : null),
+    [agent, title],
+  );
+  useEffect(() => {
+    setPayload(key, payload);
+    return () => setPayload(key, null);
+  }, [key, payload, setPayload]);
+  return payload;
 }
 
 /** The leading slot shows status; hovering a row that has children swaps in its chevron. */
@@ -955,6 +1084,8 @@ function WorkspaceRow({
   );
   const archive = useArchive(target);
   const rename = useRename(reference ?? null, ws?.title ?? null);
+  const payload = useSessionPayload(node.key, rootAgent, ws?.label, ctx);
+  const [menu, setMenu] = useState(false);
   const open_ = () =>
     rootAgent
       ? ctx.view.navigation.openAgent(rootAgent)
@@ -986,12 +1117,20 @@ function WorkspaceRow({
     <>
     {modal}
     {renameModal}
+    <SessionMenu
+      name={ws.label}
+      open={menu}
+      onClose={() => setMenu(false)}
+      onOpenInPanes={payload ? () => openInPanes(payload) : undefined}
+      onArchive={canArchive ? archive.begin : undefined}
+      p={p}
+    />
     <Row
       depth={depth}
       active={active}
       label={`Open ${ws.label}`}
       onPress={open_}
-      onLongPress={canArchive ? archive.begin : undefined}
+      onLongPress={payload || canArchive ? () => setMenu(true) : undefined}
       ctx={ctx}
     >
       {(hovered) => (
@@ -1022,6 +1161,7 @@ function WorkspaceRow({
               ) : null}
               {hovered && !archive.confirming && !rename.editing ? (
                 <View style={{ flexDirection: "row", gap: 2 }}>
+                  {payload ? <PanesButton onPress={ctx.guard(() => openInPanes(payload))} p={p} /> : null}
                   <RenameButton onPress={ctx.guard(rename.begin)} p={p} />
                   {canArchive ? <ArchiveButton onPress={ctx.guard(archive.begin)} p={p} /> : null}
                   {bucket === "needs_input" ? <StatusMark bucket={bucket} p={p} /> : null}
@@ -1086,6 +1226,8 @@ function AgentRow({
     [reference, emptied],
   );
   const archive = useArchive(target);
+  const payload = useSessionPayload(node.key, reference, agent?.label, ctx);
+  const [menu, setMenu] = useState(false);
   if (!agent || !reference) return null;
   const { p } = ctx;
   const hidden = open ? 0 : countDescendants(node);
@@ -1103,12 +1245,20 @@ function AgentRow({
   return (
     <>
     {modal}
+    <SessionMenu
+      name={agent.label}
+      open={menu}
+      onClose={() => setMenu(false)}
+      onOpenInPanes={payload ? () => openInPanes(payload) : undefined}
+      onArchive={canArchive ? archive.begin : undefined}
+      p={p}
+    />
     <Row
       depth={depth}
       active={active}
       label={`Open agent ${agent.label}`}
       onPress={() => ctx.view.navigation.openAgent(reference)}
-      onLongPress={canArchive ? archive.begin : undefined}
+      onLongPress={payload || canArchive ? () => setMenu(true) : undefined}
       ctx={ctx}
     >
       {(hovered) => (
@@ -1129,8 +1279,11 @@ function AgentRow({
               <Text numberOfLines={1} style={{ color: p.muted, fontSize: 12, lineHeight: TITLE_LINE }}>
                 {hidden > 0 ? t("collapsedBelow", { n: hidden }) : ""}
               </Text>
-              {hovered && canArchive && !archive.confirming ? (
-                <ArchiveButton onPress={ctx.guard(archive.begin)} p={p} />
+              {hovered && !archive.confirming ? (
+                <View style={{ flexDirection: "row", gap: 2 }}>
+                  {payload ? <PanesButton onPress={ctx.guard(() => openInPanes(payload))} p={p} /> : null}
+                  {canArchive ? <ArchiveButton onPress={ctx.guard(archive.begin)} p={p} /> : null}
+                </View>
               ) : (
                 <StatusMark bucket={mostUrgent(agentBucket(agent, ctx.hasPendingPermission(reference)), below)} p={p} />
               )}
