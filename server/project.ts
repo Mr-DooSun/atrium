@@ -1,13 +1,13 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { removeProject } from "../shared/project-rpc";
 import { failure, run } from "./core/exec.ts";
-import { resolvePaseoCommand } from "./core/paseo-bin.ts";
+import { paseoHomeArgs, resolvePaseoCommand } from "./core/paseo-bin.ts";
 
 export function registerProject(server: PluginServerContext) {
   server.handle(removeProject, async ({ projectId }) => {
     const paseo = await resolvePaseoCommand();
     // Same daemon home as this plugin's daemon when Paseo sets one; the CLI default otherwise.
-    const home = process.env.PASEO_HOME ? ["--home", process.env.PASEO_HOME] : [];
+    const home = paseoHomeArgs();
 
     // `project delete` reports success for an id it does not know, so check the id first:
     // otherwise a wrong id would look removed while nothing changed.

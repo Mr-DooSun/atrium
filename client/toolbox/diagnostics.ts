@@ -1,4 +1,5 @@
 import type { useTranslation } from "@getpaseo/plugin/client";
+import { PASEO_PLUGIN_TRUST_WARNING } from "../../shared/toolbox/warnings";
 import type en from "./locales/en";
 
 type Translate = ReturnType<typeof useTranslation<typeof en>>["t"];
@@ -47,7 +48,7 @@ const exact = {
   "agy has no `mcp add` command in its docs; this edits the documented config file directly.": "agyFile",
   "Marketplace installs need an active agy sign-in. Plugins with required variables install disabled.": "agyLoginNeeded",
   "Installs third-party code from a GitHub repository.": "thirdParty",
-  "Paseo plugins run unsandboxed on this machine with the daemon user's access.": "paseoTrust",
+  [PASEO_PLUGIN_TRUST_WARNING]: "paseoTrust",
   "agy is not installed (or not on PATH)": "agyMissing",
 } satisfies Record<string, StaticKey>;
 

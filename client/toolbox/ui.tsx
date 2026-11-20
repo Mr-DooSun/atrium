@@ -475,15 +475,20 @@ export function LoadingLine({ label }: { label?: string }) {
 }
 
 /** Monospace block for commands and output; selectable for OS copy. */
-export function CodeBlock({ text }: { text: string }) {
+export function CodeBlock({ text, wrap = false }: { text: string; wrap?: boolean }) {
   const { p } = useLook();
+  const content = (
+    <Text selectable style={{ color: p.foreground, fontFamily: MONO, fontSize: 12, lineHeight: 18 }}>
+      {text}
+    </Text>
+  );
   return (
     <View style={{ padding: 10, borderRadius: RADIUS, backgroundColor: p.hover, borderWidth: 1, borderColor: p.guide }}>
-      <ScrollView horizontal showsHorizontalScrollIndicator style={{ flexGrow: 0 }}>
-        <Text selectable style={{ color: p.foreground, fontFamily: MONO, fontSize: 12, lineHeight: 18 }}>
-          {text}
-        </Text>
-      </ScrollView>
+      {wrap ? content : (
+        <ScrollView horizontal showsHorizontalScrollIndicator style={{ flexGrow: 0 }}>
+          {content}
+        </ScrollView>
+      )}
     </View>
   );
 }

@@ -19,8 +19,8 @@ import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { ensureChatDir } from "../shared/chat/rpc";
 import { chatText } from "./chat-strings";
 import { ROW, TITLE_LINE, type Palette } from "./look";
-import { ProviderMark, StatusMark, agentBucket } from "./marks";
-import { ArchiveButton, ArchiveModal, archiveWarning, useArchive, NO_EMPTIED, type ArchiveTarget } from "./archive";
+import { ProviderMark, StatusMark, agentBucket, isAgentTurnActive } from "./marks";
+import { ArchiveButton, ArchiveModal, useArchive, NO_EMPTIED, type ArchiveTarget } from "./archive";
 
 /** Rows shown before "show more"; the list scrolls inside its own box past this. */
 const VISIBLE = 5;
@@ -212,11 +212,11 @@ function ChatRow({
   if (!agent) return null;
   const active = view.active.agent?.key === reference.key;
   const bucket = agentBucket(agent);
-  const canArchive = bucket !== "running";
+  const canArchive = !isAgentTurnActive(agent.status);
   return (
     <>
       {target ? (
-        <ArchiveModal state={archive} title={agent.label} warning={archiveWarning(target, 0)} danger={false} p={p} />
+        <ArchiveModal state={archive} title={agent.label} target={target} descendants={0} danger={false} p={p} />
       ) : null}
       <Pressable
         accessibilityRole="button"

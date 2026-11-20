@@ -2,7 +2,7 @@
 
 A Paseo plugin for working with many agents at once: an agent tree sidebar, usage cards for additional Claude and Codex accounts, and `/mcp` and `/plugins` screens for every configured agent CLI.
 
-<!-- Screenshot placeholder: assets/screenshot-sidebar.png (agent tree sidebar) -->
+![Atrium agent tree sidebar](assets/screenshot-sidebar.png)
 
 ## Features
 

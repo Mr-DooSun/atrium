@@ -17,13 +17,12 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plugin";
 import { buildTree, workspacesEmptiedBy, type TreeNode } from "../shared/tree";
 import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, type Palette } from "./look";
-import { ProviderMark, StatusMark, URGENT, agentBucket, mostUrgent } from "./marks";
+import { ProviderMark, StatusMark, URGENT, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
 import type { Bucket } from "./look";
 import { ChatSection, useChatDir } from "./chat";
 import {
   ArchiveButton,
   ArchiveModal,
-  archiveWarning,
   useArchive,
   type ArchiveTarget,
   type EmptiedWorkspaces,
@@ -33,6 +32,7 @@ import { RemoveProjectModal, useRemoveProject } from "./remove-project";
 import { MoveButton, ProjectMenu, ReorderBar, useProjectOrder } from "./project-order";
 import { applyOrder, dropIndex, move, orderTree, placeAt, rootsGroup, type BlockLayout } from "../shared/project-order";
 import { sidebarText } from "./sidebar-strings";
+import { usePendingPermissions } from "./pending-permissions";
 
 const ROOT = "__root__";
 
@@ -67,6 +67,7 @@ interface Ctx {
   workspaceRefs: ReadonlyMap<string, WorkspaceRef>;
   projectRefs: ReadonlyMap<string, ProjectRef>;
   agentRefs: ReadonlyMap<string, AgentRef>;
+  hasPendingPermission(ref: AgentRef): boolean;
   agentWorkspace: ReadonlyMap<string, string>;
   collapsed: ReadonlySet<string>;
   toggle(key: string): void;
@@ -119,6 +120,11 @@ const visibleAgent = (a: PluginAgentSnapshot) => !a.background;
 export function NestedSidebar(view: PluginSidebarViewProps) {
   // The free chat folder's workspaces live in the pinned section below, not in the tree.
   const chatDir = useChatDir();
+  const pendingPermissions = usePendingPermissions();
+  const hasPendingPermission = useCallback(
+    (ref: AgentRef) => pendingPermissions.get(ref.hostId)?.has(ref.id) ?? false,
+    [pendingPermissions],
+  );
   const inTree = useCallback(
     (w: PluginWorkspaceSnapshot) => visibleWorkspace(w) && w.projectRootPath !== chatDir,
     [chatDir],
@@ -412,6 +418,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     projectRefs,
     agentRefs,
     agentWorkspace,
+    hasPendingPermission,
     collapsed,
     toggle,
     reordering,
@@ -476,11 +483,21 @@ function ProjectBlock({ project, ctx }: { project: { projectKey: string; roots: 
   const empty = project.roots.length === 0;
   const target = useMemo(() => ({ group: PROJECTS, key: project.projectKey }), [project.projectKey]);
   const group = ctx.rootGroup(project.projectKey);
+  const hasPendingPermission = !open && project.roots.some((node) => {
+    const keys = descendantAgents(node);
+    if (node.kind === "agent") keys.add(node.key);
+    else if (node.agentKey) keys.add(node.agentKey);
+    for (const key of keys) {
+      const agent = ctx.agentRefs.get(key);
+      if (agent && ctx.hasPendingPermission(agent)) return true;
+    }
+    return false;
+  });
   if (!ref) return null;
   return (
     <DragItem target={target} inset={0} paddingBottom={open ? PROJECT.blockGap : 2} ctx={ctx}>
       <DragTargetContext.Provider value={target}>
-        <ProjectRow reference={ref} open={open} ctx={ctx} />
+        <ProjectRow reference={ref} open={open} hasPendingPermission={hasPendingPermission} ctx={ctx} />
       </DragTargetContext.Provider>
       {open ? (
         // The project's line leaves its chevron and runs down to the first row.
@@ -809,23 +826,24 @@ function countDescendants(node: TreeNode): number {
   return node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
 }
 
-function useRunningBelow(node: TreeNode) {
-  const keys = useMemo(() => descendantAgents(node), [node]);
-  return useAgents({
-    where: (a) => keys.has(a.ref.key) && (a.status === "running" || a.status === "initializing"),
-  }).length;
+function useDescendantAgentKeys(node: TreeNode) {
+  return useMemo(() => descendantAgents(node), [node]);
+}
+
+function useHasActiveDescendants(keys: ReadonlySet<string>) {
+  return useAgents({ where: (a) => keys.has(a.ref.key) && isAgentTurnActive(a.status) }).length > 0;
 }
 
 /**
  * The most urgent state among the agents a folded row hides, so a collapsed row still says
  * that something below it is running or waiting. One query per urgent state, in a fixed order.
  */
-function useUrgentBelow(node: TreeNode, folded: boolean): Bucket {
+function useUrgentBelow(node: TreeNode, folded: boolean, ctx: Ctx): Bucket {
   const keys = useMemo(() => (folded ? descendantAgents(node) : new Set<string>()), [node, folded]);
   const counts = URGENT.map(
     (level) =>
       // eslint-disable-next-line react-hooks/rules-of-hooks -- URGENT is a constant list
-      useAgents({ where: (a) => keys.has(a.ref.key) && !a.background && agentBucket(a) === level }).length,
+      useAgents({ where: (a) => keys.has(a.ref.key) && !a.background && agentBucket(a, ctx.hasPendingPermission(a.ref)) === level }).length,
   );
   return URGENT[counts.findIndex((n) => n > 0)] ?? "done";
 }
@@ -888,8 +906,13 @@ function WorkspaceRow({
     additions: w.diffStat?.additions ?? null,
     deletions: w.diffStat?.deletions ?? null,
   }));
-  const running = useRunningBelow(node);
-  const below = useUrgentBelow(node, !open);
+  const { t } = useTranslation(sidebarText);
+  const childAgents = useDescendantAgentKeys(node);
+  const running = useAgents({
+    where: (a) => childAgents.has(a.ref.key) && agentBucket(a, ctx.hasPendingPermission(a.ref)) === "running",
+  }).length;
+  const hasActiveDescendants = useHasActiveDescendants(childAgents);
+  const below = useUrgentBelow(node, !open, ctx);
   // The row stands for the workspace's root agent when it has exactly one. Opening the
   // workspace would restore whichever tab was focused last, often a sub-agent's chat.
   // With several root agents the row opens the most recently active one: opening the workspace
@@ -910,7 +933,11 @@ function WorkspaceRow({
       ? activeAgent === rootAgent.key
       : inWorkspace
     : inWorkspace && !activeAgent;
-  const rootProvider = useAgent(rootAgent ?? node.key, (a) => a.provider);
+  const root = useAgent(rootAgent ?? node.key, (a) => ({
+    provider: a.provider,
+    activeTurn: isAgentTurnActive(a.status),
+    bucket: agentBucket(a, ctx.hasPendingPermission(a.ref)),
+  }));
   const emptied = useEmptiedWorkspaces(node, ctx);
   const target: ArchiveTarget | null = useMemo(
     () =>
@@ -935,13 +962,15 @@ function WorkspaceRow({
   if (!ws || !reference) return null;
   const { p } = ctx;
   const hidden = open ? 0 : countDescendants(node);
+  const bucket = mostUrgent(ws.indicator, root?.bucket === "needs_input" ? root.bucket : null, below);
   // Only finished work: nothing in this row or below it is running.
-  const canArchive = ws.indicator !== "running" && running === 0;
+  const canArchive = ws.indicator !== "running" && !root?.activeTurn && !hasActiveDescendants;
   const modal = target ? (
     <ArchiveModal
       state={archive}
       title={ws.label}
-      warning={archiveWarning(target, countDescendants(node))}
+      target={target}
+      descendants={countDescendants(node)}
       danger={(target.kind === "workspace" && target.worktree) || target.emptied.worktrees > 0}
       p={p}
     />
@@ -951,8 +980,8 @@ function WorkspaceRow({
   // checkout would all repeat the same branch.
   const branch = ws.kind === "worktree" ? ws.branch : null;
   const meta: ReactNode[] = [];
-  if (running > 0) meta.push(<Text key="run" style={{ color: p.running }}>하위 {running}개 실행 중</Text>);
-  if (hidden > 0) meta.push(<Text key="hid">{hidden}개 접힘</Text>);
+  if (running > 0) meta.push(<Text key="run" style={{ color: p.running }}>{t("runningBelow", { n: running })}</Text>);
+  if (hidden > 0) meta.push(<Text key="hid">{t("collapsedBelow", { n: hidden })}</Text>);
   return (
     <>
     {modal}
@@ -970,8 +999,8 @@ function WorkspaceRow({
           <Leading
             node={node}
             mark={
-              rootAgent && rootProvider ? (
-                <ProviderMark provider={rootProvider} p={ctx.p} />
+              rootAgent && root?.provider ? (
+                <ProviderMark provider={root.provider} p={ctx.p} />
               ) : (
                 <Glyph name="FolderGit2" ctx={ctx} />
               )
@@ -995,9 +1024,10 @@ function WorkspaceRow({
                 <View style={{ flexDirection: "row", gap: 2 }}>
                   <RenameButton onPress={ctx.guard(rename.begin)} p={p} />
                   {canArchive ? <ArchiveButton onPress={ctx.guard(archive.begin)} p={p} /> : null}
+                  {bucket === "needs_input" ? <StatusMark bucket={bucket} p={p} /> : null}
                 </View>
               ) : (
-                <StatusMark bucket={mostUrgent(ws.indicator, below)} p={p} />
+                <StatusMark bucket={bucket} p={p} />
               )}
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
@@ -1046,8 +1076,10 @@ function AgentRow({
     attentionReason: a.attentionReason,
   }));
   const active = ctx.view.active.agent?.key === node.key;
-  const runningBelow = useRunningBelow(node);
-  const below = useUrgentBelow(node, !open);
+  const { t } = useTranslation(sidebarText);
+  const childAgents = useDescendantAgentKeys(node);
+  const hasActiveDescendants = useHasActiveDescendants(childAgents);
+  const below = useUrgentBelow(node, !open, ctx);
   const emptied = useEmptiedWorkspaces(node, ctx);
   const target: ArchiveTarget | null = useMemo(
     () => (reference ? { kind: "agent", ref: reference, emptied } : null),
@@ -1057,12 +1089,13 @@ function AgentRow({
   if (!agent || !reference) return null;
   const { p } = ctx;
   const hidden = open ? 0 : countDescendants(node);
-  const canArchive = agentBucket(agent) !== "running" && runningBelow === 0;
+  const canArchive = !isAgentTurnActive(agent.status) && !hasActiveDescendants;
   const modal = target ? (
     <ArchiveModal
       state={archive}
       title={agent.label}
-      warning={archiveWarning(target, countDescendants(node))}
+      target={target}
+      descendants={countDescendants(node)}
       danger={target.emptied.worktrees > 0}
       p={p}
     />
@@ -1094,12 +1127,12 @@ function AgentRow({
               </Text>
               {away && node.ownsWorkspace ? <DiffStat workspaceKey={away} ctx={ctx} /> : null}
               <Text numberOfLines={1} style={{ color: p.muted, fontSize: 12, lineHeight: TITLE_LINE }}>
-                {hidden > 0 ? `${hidden}개 접힘` : ""}
+                {hidden > 0 ? t("collapsedBelow", { n: hidden }) : ""}
               </Text>
               {hovered && canArchive && !archive.confirming ? (
                 <ArchiveButton onPress={ctx.guard(archive.begin)} p={p} />
               ) : (
-                <StatusMark bucket={mostUrgent(agentBucket(agent), below)} p={p} />
+                <StatusMark bucket={mostUrgent(agentBucket(agent, ctx.hasPendingPermission(reference)), below)} p={p} />
               )}
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
@@ -1140,10 +1173,12 @@ function DiffStat({ workspaceKey, ctx }: { workspaceKey: string; ctx: Ctx }) {
 function ProjectRow({
   reference,
   open,
+  hasPendingPermission,
   ctx,
 }: {
   reference: ProjectRef;
   open: boolean;
+  hasPendingPermission: boolean;
   ctx: Ctx;
 }) {
   const { t } = useTranslation(sidebarText);
@@ -1156,7 +1191,8 @@ function ProjectRow({
   const dragTarget = useContext(DragTargetContext);
   const dragSource = useDragSource(dragTarget, ctx);
   // Folded, the header stands in for its rows: it shows the most urgent state among them.
-  const urgent = useUrgentInProject(reference, !open);
+  const workspaceUrgency = useUrgentInProject(reference, !open);
+  const urgent = hasPendingPermission ? "needs_input" : workspaceUrgency;
   const { p } = ctx;
   if (!name) return null;
   return (

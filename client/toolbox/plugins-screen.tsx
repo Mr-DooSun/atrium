@@ -427,6 +427,7 @@ function BrowseList({
   const items = useMemo(() => pages.flatMap((page) => page.plugins), [pages]);
   const total = pages[0]?.total ?? items.length;
   const firstError = pages[0]?.error ?? null;
+  const catalogSource = scope.ecosystem === "paseo" ? pages[0]?.marketplaces[0]?.name : undefined;
   const loadMore = () => {
     if (query.hasNextPage && !query.isFetchingNextPage && !query.isFetching) void query.fetchNextPage();
   };
@@ -457,13 +458,16 @@ function BrowseList({
       {query.isError ? <Notice tone="danger" text={`${t.plugins.loadError}: ${t.diagnostic(errorText(query.error))}`} /> : null}
       {firstError ? <Notice tone="warning" text={t.diagnostic(firstError)} /> : null}
       {query.isSuccess && !query.isFetching && items.length === 0 ? <EmptyState icon="Search" title={t.plugins.browseEmpty} /> : null}
-      {total > 0 ? <SectionLabel>{t.plugins.catalogShown(items.length, total)}</SectionLabel> : null}
+      {total > 0 ? (
+        <SectionLabel>{[catalogSource, t.plugins.catalogShown(items.length, total)].filter(Boolean).join(" · ")}</SectionLabel>
+      ) : null}
       {items.length > 0 ? (
         <Card>
           {items.map((plugin, i) => (
             <CatalogRow
               key={`${plugin.marketplace ?? ""}:${plugin.id}`}
               plugin={plugin}
+              showMarketplace={!catalogSource}
               installedIn={installedIn?.(plugin.id)}
               canInstall={caps.plugin.includes("install")}
               first={i === 0}
@@ -486,6 +490,7 @@ function BrowseList({
 
 function CatalogRow({
   plugin,
+  showMarketplace,
   canInstall,
   first,
   busy,
@@ -493,6 +498,7 @@ function CatalogRow({
   installedIn,
 }: {
   installedIn?: { n: number; total: number };
+  showMarketplace: boolean;
   plugin: CatalogPlugin;
   canInstall: boolean;
   first: boolean;
@@ -500,7 +506,7 @@ function CatalogRow({
   onAction: StartPlugin;
 }) {
   const t = useToolboxText();
-  const meta = [plugin.marketplace, plugin.categories.join(", ")].filter(Boolean).join(" · ");
+  const meta = [showMarketplace ? plugin.marketplace : null, plugin.categories.join(", ")].filter(Boolean).join(" · ");
   return (
     <ListRow
       first={first}
