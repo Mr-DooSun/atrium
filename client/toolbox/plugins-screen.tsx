@@ -347,6 +347,19 @@ type StartPlugin = (action: PluginAction, pluginId: string, name: string, market
 
 export { ACTIVITY_OF, FILTERS, attention, catalogSorts, pluginFacts, rowFacts, trackKey };
 
+/** A unique key per item: `base(item)`, with "#2", "#3" ... for repeats, in list order. */
+function withKeys<T>(items: readonly T[], base: (item: T) => string): Map<T, string> {
+  const seen = new Map<string, number>();
+  const out = new Map<T, string>();
+  for (const item of items) {
+    const b = base(item);
+    const n = (seen.get(b) ?? 0) + 1;
+    seen.set(b, n);
+    out.set(item, n === 1 ? b : `${b}#${n}`);
+  }
+  return out;
+}
+
 // ---- Installed: search, state filters, sort ----------------------------------------------------
 
 /** Search, filter chips and sort over a complete (unpaged) list; the logic is `installedView`. */
@@ -425,7 +438,11 @@ function InstalledList({
   const items = query.data?.plugins ?? [];
   const view = useInstalledView(items, pluginFacts);
   const [open, setOpen] = useState<string | null>(null);
-  const opened = open ? items.find((x) => x.id === open) ?? null : null;
+  // One plugin id can be listed once per scope (and per project for local scope), so cards are
+  // keyed by id, scope and occurrence; a bare id would collide and React would reuse wrong rows.
+  const keyed = useMemo(() => withKeys(items, (x) => `${x.id}\u0000${x.scope ?? ""}`), [items]);
+  const keyOf = (plugin: InstalledPlugin) => keyed.get(plugin) ?? plugin.id;
+  const opened = open ? items.find((x) => keyOf(x) === open) ?? null : null;
   return (
     <View style={{ gap: 8 }}>
       {query.isPending ? <LoadingLine /> : null}
@@ -438,13 +455,13 @@ function InstalledList({
         <View style={{ gap: 8 }}>
           {view.shown.map((plugin) => (
             <InstalledCard
-              key={plugin.id}
+              key={keyOf(plugin)}
               plugin={plugin}
               scope={scope}
               busy={busy}
               onAction={onAction}
               activity={activity(trackKey(scope.ecosystem, scope.profileId, plugin.id))}
-              onOpen={() => setOpen(plugin.id)}
+              onOpen={() => setOpen(keyOf(plugin))}
             />
           ))}
         </View>

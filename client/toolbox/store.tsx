@@ -138,7 +138,16 @@ export function PluginCard({
   const tile = layout === "tile";
   const tags = m.categories.slice(0, 3);
   const descColor = descriptionTone === "danger" ? p.danger : p.muted;
-  const footer = control || actions ? (
+  // Wide list rows keep their buttons beside the text, like Paseo's own rows; tiles and compact
+  // layouts put them on a line of their own.
+  const inline = !tile && !compact;
+  const buttons = (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+      {actions}
+      {control}
+    </View>
+  );
+  const footer = !inline && (control || actions) ? (
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, justifyContent: tile ? "space-between" : "flex-end" }}>
       {tile ? <View style={{ flexDirection: "row", gap: 4, flexShrink: 1, overflow: "hidden" }}>{tags.map((c) => <Tag key={c} label={c} />)}</View> : null}
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
@@ -194,6 +203,7 @@ export function PluginCard({
           ) : null}
           {below}
         </View>
+        {inline && (control || actions) ? <View style={{ flexShrink: 0, maxWidth: "45%" }}>{buttons}</View> : null}
       </View>
       {footer}
     </Pressable>
@@ -269,7 +279,7 @@ export function PluginDetail({
     rows.push({ label: t.plugins.detail.version, value: versionText(m.version) });
   }
   if (m.updateTo) rows.push({ label: t.plugins.detail.updateTo, value: versionText(m.updateTo) });
-  if (m.installs !== null) rows.push({ label: t.plugins.detail.installs, value: t.plugins.installs(m.installs) });
+  if (m.installs !== null) rows.push({ label: t.plugins.detail.installs, value: t.count(m.installs) });
   if (m.updatedAt) rows.push({ label: t.plugins.detail.updated, value: t.date(m.updatedAt) });
   if (m.license) rows.push({ label: t.plugins.detail.license, value: m.license });
   if (info.scope) rows.push({ label: t.plugins.detail.scope, value: info.scope });
@@ -346,10 +356,8 @@ export function PluginDetail({
         ) : null}
         {m.homepage ? (
           <ExternalLink href={m.homepage} accessibilityLabel={t.plugins.detail.homepage}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Icon name="ExternalLink" size={13} color={p.foreground} />
-              <Text style={{ color: p.foreground, fontSize: 13, textDecorationLine: "underline" }}>{t.plugins.detail.homepage}</Text>
-            </View>
+            {/* ExternalLink draws its own outward arrow. */}
+            <Text style={{ color: p.foreground, fontSize: 13, textDecorationLine: "underline" }}>{t.plugins.detail.homepage}</Text>
           </ExternalLink>
         ) : null}
       </Modal.Content>

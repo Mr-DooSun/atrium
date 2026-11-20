@@ -39,6 +39,8 @@ type Translate = ReturnType<typeof useTranslation<typeof en>>["t"];
 function toolboxStrings(t: Translate, numbers: Intl.NumberFormat, compact: Intl.NumberFormat, dates: Intl.DateTimeFormat) {
   return {
     diagnostic: (text: string) => localizeDiagnostic(t, text),
+    /** A count in the locale's short form (1.2K, 1.2천). */
+    count: (n: number) => compact.format(n),
     /** An ISO date in the user's locale; the raw text when it does not parse. */
     date: (iso: string) => {
       const d = new Date(iso);
