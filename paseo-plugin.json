@@ -10,13 +10,10 @@
   },
   "icon": "assets/icon.png",
   "media": [
-    "assets/hero-dark-1600.jpg",
-    "assets/screenshot-sidebar.png",
-    "assets/screenshot-panes.png",
-    "assets/screenshot-worktrees.png",
-    "assets/screenshot-plugins.png",
-    "assets/screenshot-confirm.png",
-    "assets/screenshot-reorder.png"
+    "assets/listing-01-agent-tree.jpg",
+    "assets/listing-02-panes.jpg",
+    "assets/listing-03-plugins.jpg",
+    "assets/listing-04-install-review.jpg"
   ],
   "requirements": {
     "paseo": ">=0.16.1"
