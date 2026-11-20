@@ -3,7 +3,7 @@
 import type { PluginAgentCommandContext, PluginClientContext, PluginScreenParams } from "@getpaseo/plugin/client";
 import { McpScreen } from "./mcp-screen";
 import { PluginsScreen } from "./plugins-screen";
-import { t } from "./strings";
+import { toolboxText } from "./strings";
 
 export const TOOLBOX_SCREENS = { mcp: "mcp", plugins: "plugins" } as const;
 
@@ -33,21 +33,21 @@ function openPlugins(ctx: PluginAgentCommandContext, args: string) {
 
 export function registerToolbox(client: PluginClientContext): () => void {
   const cleanups = [
-    client.addScreen({ id: TOOLBOX_SCREENS.mcp, title: t.screen.mcp, Component: McpScreen }),
-    client.addScreen({ id: TOOLBOX_SCREENS.plugins, title: t.screen.plugins, Component: PluginsScreen }),
+    client.addScreen({ id: TOOLBOX_SCREENS.mcp, title: toolboxText.message("screen.mcp"), Component: McpScreen }),
+    client.addScreen({ id: TOOLBOX_SCREENS.plugins, title: toolboxText.message("screen.plugins"), Component: PluginsScreen }),
 
     client.addSlashCommand({
       name: "mcp",
-      description: t.command.mcpDescription,
-      argumentHint: t.command.mcpHint,
+      description: toolboxText.message("command.mcpDescription"),
+      argumentHint: toolboxText.message("command.mcpHint"),
       context: "agent",
       onSubmit: (ctx) => openMcp(ctx, ctx.args),
     }),
     ...["plugins", "plugin"].map((name) =>
       client.addSlashCommand({
         name,
-        description: t.command.pluginsDescription,
-        argumentHint: t.command.pluginsHint,
+        description: toolboxText.message("command.pluginsDescription"),
+        argumentHint: toolboxText.message("command.pluginsHint"),
         context: "agent",
         onSubmit: (ctx) => openPlugins(ctx, ctx.args),
       }),
@@ -55,7 +55,7 @@ export function registerToolbox(client: PluginClientContext): () => void {
 
     client.addCommandCenterItem({
       id: "toolbox-mcp",
-      title: t.command.mcpCenter,
+      title: toolboxText.message("command.mcpCenter"),
       icon: "Plug",
       keywords: ["mcp", "server", "서버"],
       context: "agent",
@@ -63,7 +63,7 @@ export function registerToolbox(client: PluginClientContext): () => void {
     }),
     client.addCommandCenterItem({
       id: "toolbox-plugins",
-      title: t.command.pluginsCenter,
+      title: toolboxText.message("command.pluginsCenter"),
       icon: "Puzzle",
       keywords: ["plugin", "plugins", "marketplace", "플러그인", "마켓플레이스"],
       context: "agent",

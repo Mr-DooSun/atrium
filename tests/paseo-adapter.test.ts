@@ -67,7 +67,7 @@ else process.exitCode = 2;
 `);
   await chmod(command, 0o700);
 
-  const fetchRegistry = t.mock.method(globalThis, "fetch", async (url) => {
+  const fetchRegistry = t.mock.method(globalThis, "fetch", async (url: Parameters<typeof fetch>[0]) => {
     assert.equal(url, "https://plugins.paseo.sh/index.json");
     return new Response(JSON.stringify(registry));
   });
@@ -92,6 +92,7 @@ else process.exitCode = 2;
   const git = await adapter.previewAction(null, "install", "example/first", null);
   assert.deepEqual(git.command, [command, "plugin", "add", "git:https://github.com/example/kit.git",
     "--ref", `${commit}^{commit}`, "--json", "--path", "plugins/first"]);
+  assert.ok(git.source);
   assert.match(git.source, new RegExp(commit));
   const update = await adapter.previewAction(null, "update", "direct", null);
   assert.deepEqual(update.command, [command, "plugin", "update", "direct", "--ref", commit, "--json"]);
@@ -105,8 +106,11 @@ else process.exitCode = 2;
   const registryUpdate = await adapter.previewAction(null, "update", "renamed", null);
   assert.equal(registryUpdate.supported, false);
   assert.deepEqual(registryUpdate.command, [command, "plugin", "update", "renamed"]);
+  assert.ok(registryUpdate.source);
   assert.match(registryUpdate.source, new RegExp(commit));
-  assert.match((await adapter.runAction(null, "update", "renamed", null)).error, /interactive review/);
+  const registryUpdateResult = await adapter.runAction(null, "update", "renamed", null);
+  assert.ok(registryUpdateResult.error);
+  assert.match(registryUpdateResult.error, /interactive review/);
   assert.equal((await adapter.runAction(null, "enable", "direct", null)).ok, true);
   assert.equal((await adapter.previewAction(null, "install", "example/missing", null)).supported, false);
   assert.equal((await adapter.runMarketplaceAction(null, "add", "example.com")).ok, false);

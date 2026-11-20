@@ -1,11 +1,13 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, copyFile, link, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { getProjectOrder, setNodeOrder, setProjectOrder } from "../shared/project-order";
 
 /** Beside the daemon's own data, so a second daemon home keeps its own order. */
-const FILE = join(process.env.PASEO_HOME ?? join(homedir(), ".paseo"), "nested-agents", "project-order.json");
+const HOME_DIR = process.env.PASEO_HOME ?? join(homedir(), ".paseo");
+const FILE = join(HOME_DIR, "atrium", "project-order.json");
+const LEGACY_FILE = join(HOME_DIR, "nested-agents", "project-order.json");
 
 interface Stored {
   order: string[];
@@ -15,7 +17,39 @@ interface Stored {
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((k): k is string => typeof k === "string" && k.length > 0) : [];
 
+let migration: Promise<void> | undefined;
+
+async function migrateOrder(): Promise<void> {
+  try {
+    await access(FILE);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  const temp = `${FILE}.${process.pid}.migration.tmp`;
+  try {
+    await access(LEGACY_FILE);
+    await mkdir(dirname(FILE), { recursive: true });
+    await copyFile(LEGACY_FILE, temp);
+    // Publish the complete copy only if the destination is still absent.
+    await link(temp, FILE);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "EEXIST") throw error;
+  } finally {
+    await unlink(temp).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
+}
+
 async function read(): Promise<Stored> {
+  migration ??= migrateOrder().catch((error: unknown) => {
+    migration = undefined;
+    throw error;
+  });
+  await migration;
   try {
     const value = JSON.parse(await readFile(FILE, "utf8")) as { order?: unknown; nodes?: unknown };
     const nodes: Record<string, string[]> = {};

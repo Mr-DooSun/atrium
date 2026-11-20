@@ -1,9 +1,9 @@
 {
-  "id": "paseo-nested-agents",
+  "id": "atrium",
+  "name": "Atrium",
+  "description": "Nested agent tree sidebar, usage and token monitor for additional Claude and Codex accounts, and an MCP and plugin toolbox.",
   "media": [],
   "requirements": {
     "paseo": ">=0.16.1"
-  },
-  "name": "Nested agents & token monitor",
-  "description": "Organizes agents in a workspace hierarchy, and extends Paseo's usage panel with additional Claude and Codex accounts on the host."
+  }
 }

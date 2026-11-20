@@ -1,0 +1,99 @@
+import type { useTranslation } from "@getpaseo/plugin/client";
+import type en from "./locales/en";
+
+type Translate = ReturnType<typeof useTranslation<typeof en>>["t"];
+type Diagnostic = typeof en.diagnostic;
+type StaticKey = { [K in keyof Diagnostic]: Diagnostic[K] extends `${string}{{${string}` ? never : K }[keyof Diagnostic];
+
+// Adapters and older clients use plain strings on the wire. Match only diagnostics we own;
+// preserve provider output, IPC errors, and already-redacted values as written.
+const exact = {
+  "agy documents no plugin update command": "agyUpdate",
+  "mcpServers is not an object": "invalidMcpServers",
+  "Changing the Paseo marketplace is not supported by this CLI": "unsupportedMarketplace",
+  "This marketplace source or name is not supported by this CLI": "invalidMarketplace",
+  "프로젝트 디렉터리를 선택하거나 user 범위를 지정하세요.": "projectRequired",
+  "project scope needs a workspace directory": "projectRequired",
+  "timed out": "timeout",
+  "Claude CLI 응답 시간이 초과되었습니다.": "timeout",
+  "output exceeded the size limit": "outputLimit",
+  "Claude CLI 출력이 크기 제한을 초과했습니다.": "outputLimit",
+  "Use a valid Codex MCP server name.": "invalidName",
+  "This MCP name is not supported by this CLI": "invalidName",
+  "This MCP name or scope is not supported by this CLI": "invalidNameOrScope",
+  "Codex MCP changes apply to this profile's global configuration.": "codexScope",
+  "Codex supports stdio and streamable HTTP.": "codexTransport",
+  "The Codex MCP add CLI cannot set custom headers.": "codexHeaders",
+  "Streamable HTTP requires an HTTP(S) URL and accepts no stdio arguments or environment values.": "httpTarget",
+  "Use valid environment variable names.": "invalidEnv",
+  "MCP OAuth requires a terminal that can keep the login process open and accept callback input.": "codexOAuth",
+  "Run the displayed command in a terminal on the daemon host with this profile's environment. Open the authorization URL and paste the callback URL into that terminal.": "codexTerminal",
+  "agy has no CLI command for MCP login: OAuth runs in the browser automatically when the server connects. Open /mcp inside agy to reconnect.": "agyOAuth",
+  "Antigravity supports Streamable HTTP only; legacy SSE is not supported": "agyTransport",
+  "Choose a Codex plugin and its marketplace.": "choosePlugin",
+  "invalid plugin id": "choosePlugin",
+  "Choose a plugin from the official Paseo registry.": "officialPlugin",
+  "Choose an installed Paseo plugin.": "installedPlugin",
+  "This Paseo plugin target is not supported by this CLI": "installedPlugin",
+  "Paseo plugin is no longer installed.": "installedPlugin",
+  "Paseo registry entry has no supported immutable install target.": "pinnedTarget",
+  "Paseo returned an update target that cannot be pinned.": "pinnedTarget",
+  "Paseo reports no update available.": "noUpdate",
+  "Open a new preview and confirm its pinned revision before proceeding.": "newPreview",
+  "The installed plugin changed. Open a new update preview.": "newPreview",
+  "This Paseo CLI requires interactive review for registry installations. Run the displayed command in a terminal and confirm the revision shown there.": "manualInstall",
+  "env values and headers are stored in plain text in the config file.": "plainSecrets",
+  "Stdio environment values are passed as process arguments and can be visible to other local processes while Codex runs.": "processSecrets",
+  "agy has no `mcp add` command in its docs; this edits the documented config file directly.": "agyFile",
+  "Marketplace installs need an active agy sign-in. Plugins with required variables install disabled.": "agyLoginNeeded",
+  "Installs third-party code from a GitHub repository.": "thirdParty",
+  "Paseo plugins run unsandboxed on this machine with the daemon user's access.": "paseoTrust",
+  "agy is not installed (or not on PATH)": "agyMissing",
+} satisfies Record<string, StaticKey>;
+
+type DetailKey = { [K in keyof Diagnostic]: Diagnostic[K] extends `${string}{{detail}}${string}` ? K : never }[keyof Diagnostic];
+const details: readonly (readonly [DetailKey, RegExp])[] = [
+  ["unknownProfile", /^Unknown profile: (.+)$/],
+  ["requiresProfile", /^(claude|codex|antigravity) plugins need a profile$/],
+  ["requiresProfile", /^(Codex) plugins require a profile\.$/],
+  ["absolutePath", /^Project path must be absolute: (.+)$/],
+  ["missingPath", /^Project directory does not exist: (.+)$/],
+  ["unknownScope", /^unknown scope "(.+)"$/],
+  ["unsupportedCli", /^(.+) is not supported by this CLI$/],
+  ["exitCode", /^(?:exit |Claude CLI 종료 코드: )(-?\d+)$/],
+  ["exitCode", /^Codex failed during .+ \(exit (.+)\)\.$/],
+  ["invalidResponse", /^(Codex) returned (?:an invalid MCP list|invalid JSON for .+)\.$/],
+  ["invalidResponse", /^(Paseo) returned an invalid (?:installed plugin list|update result)\.$/],
+  ["invalidResponse", /^(Paseo registry) returned an invalid catalog\.$/],
+  ["registryHttp", /^Paseo registry returned HTTP (\d+)\.$/],
+  ["writeFailed", /^write failed: ([\s\S]+)$/],
+  ["badConfig", /^(.+): mcp_config\.json is (?:not a JSON object|not valid JSON:[\s\S]+); not modified$/],
+  ["outsideProject", /^project (\.agents directory|mcp_config\.json) resolves outside the project; refusing$/],
+  ["missingServer", /^MCP server "(.+)" not found(?: in agy config files)?$/],
+  ["existingServer", /^MCP server "(.+)" already exists$/],
+  ["ambiguousServer", /^"(.+)" exists in both project and user config; pass a scope$/],
+  ["updateNotApplied", /^Paseo did not apply the update \((.+)\)\.$/],
+  ["codexBrowser", /^Codex HTTP add can launch OAuth in a browser\..+ run codex mcp login (.+) --no-browser\.$/],
+];
+
+export function localizeDiagnostic(t: Translate, text: string): string {
+  if (Object.hasOwn(exact, text)) return t(`diagnostic.${exact[text as keyof typeof exact]}`);
+  const wrongProfile = /^Profile (.+) is not a (claude|codex|antigravity) profile$/.exec(text);
+  if (wrongProfile) return t("diagnostic.wrongProfile", { id: wrongProfile[1], ecosystem: wrongProfile[2] });
+  const claudeOAuth = /^(.+) 프로필로 Claude 터미널을 열고 \/mcp에서 (.+) 인증을 완료하세요\. mcp login --no-browser는 리디렉션 URL 입력이 필요합니다\.$/.exec(text);
+  if (claudeOAuth) return t("diagnostic.claudeOAuth", { id: claudeOAuth[1], name: claudeOAuth[2] });
+  if (text === "Claude 프로필이 필요합니다.") return t("diagnostic.requiresProfile", { detail: "Claude" });
+  if (text === "Claude CLI의 JSON 응답이 불완전합니다. 출력 크기 제한을 확인하세요.") {
+    return t("diagnostic.invalidResponse", { detail: "Claude CLI" });
+  }
+  if (/^Codex timed out during .+\.$/.test(text)) return t("diagnostic.timeout");
+  if (/^Codex output exceeded the limit during .+\.$/.test(text)) return t("diagnostic.outputLimit");
+  if (text.startsWith("agy is not installed (or not on PATH): ")) {
+    return `${t("diagnostic.agyMissing")} ${text.slice("agy is not installed (or not on PATH): ".length)}`;
+  }
+  for (const [key, pattern] of details) {
+    const match = pattern.exec(text);
+    if (match) return t(`diagnostic.${key}`, { detail: match[1] });
+  }
+  return text;
+}

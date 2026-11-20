@@ -26,7 +26,7 @@ import {
 import { palette } from "../look";
 import { useActionFlow, type ActionFlow, type ActionTarget } from "./action-flow";
 import { keys, useProfiles } from "./queries";
-import { t } from "./strings";
+import { ToolboxTextProvider, useToolboxStrings, useToolboxText, type Strings } from "./strings";
 import {
   ALL_PROFILES,
   Badge,
@@ -65,18 +65,22 @@ function asEcosystem(value: string | undefined): Ecosystem | null {
 }
 
 export function PluginsScreen({ theme, layout, host, params, navigation }: PluginScreenProps) {
+  const strings = useToolboxStrings();
   const look = useMemo(() => ({ p: palette(theme.colors), compact: layout.compact }), [theme, layout.compact]);
   return (
-    <LookProvider value={look}>
-      <View style={{ flex: 1 }}>
-        <BackBar agentId={params.agentId} title={params.agentTitle} hostId={host.id} navigation={navigation} />
-        <PluginsBody hostId={host.id} params={params} />
-      </View>
-    </LookProvider>
+    <ToolboxTextProvider value={strings}>
+      <LookProvider value={look}>
+        <View style={{ flex: 1 }}>
+          <BackBar agentId={params.agentId} title={params.agentTitle} hostId={host.id} navigation={navigation} />
+          <PluginsBody hostId={host.id} params={params} />
+        </View>
+      </LookProvider>
+    </ToolboxTextProvider>
   );
 }
 
 function PluginsBody({ hostId, params }: { hostId: string; params: Record<string, string> }) {
+  const t = useToolboxText();
   const { query: profilesQuery, refresh, refreshing } = useProfiles();
   const profiles = profilesQuery.data?.profiles ?? [];
   const flow = useActionFlow(hostId);
@@ -119,7 +123,7 @@ function PluginsBody({ hostId, params }: { hostId: string; params: Record<string
         <>
           {profilesQuery.isPending ? <LoadingLine /> : null}
           {profilesQuery.isError ? (
-            <Notice tone="danger" text={`${t.profile.loadError}: ${errorText(profilesQuery.error)}`} />
+            <Notice tone="danger" text={`${t.profile.loadError}: ${t.diagnostic(errorText(profilesQuery.error))}`} />
           ) : null}
           {profilesQuery.isSuccess && ofKind.length === 0 ? (
             <EmptyState icon="Users" title={t.profile.noneOfKind(t.plugins.tabs[activeTab])} />
@@ -157,6 +161,7 @@ function ProfileGate({
   cwd: string | null;
   flow: ActionFlow;
 }) {
+  const t = useToolboxText();
   if (profile.auth.state === "not_installed") {
     return <EmptyState icon="PackageX" title={t.profile.notInstalledTitle} body={t.profile.notInstalledBody(profile.command)} />;
   }
@@ -180,6 +185,7 @@ function EcosystemView({
   cwd: string | null;
   flow: ActionFlow;
 }) {
+  const t = useToolboxText();
   const [section, setSection] = useState<Section>("installed");
   const caps = ECOSYSTEM_CAPS[ecosystem];
   const sections: Section[] = caps.marketplace.length > 0 ? ["installed", "browse", "marketplaces"] : ["installed", "browse"];
@@ -266,6 +272,7 @@ function InstalledList({
   busy: boolean;
   onAction: StartPlugin;
 }) {
+  const t = useToolboxText();
   const list = useRpc(listInstalledPlugins);
   const query = useQuery({
     queryKey: keys.installed(scope.ecosystem, scope.profileId, scope.cwd),
@@ -275,8 +282,8 @@ function InstalledList({
   return (
     <View style={{ gap: 8 }}>
       {query.isPending ? <LoadingLine /> : null}
-      {query.isError ? <Notice tone="danger" text={`${t.plugins.loadError}: ${errorText(query.error)}`} /> : null}
-      {query.data?.error ? <Notice tone="warning" text={query.data.error} /> : null}
+      {query.isError ? <Notice tone="danger" text={`${t.plugins.loadError}: ${t.diagnostic(errorText(query.error))}`} /> : null}
+      {query.data?.error ? <Notice tone="warning" text={t.diagnostic(query.data.error)} /> : null}
       {query.isSuccess && items.length === 0 ? <EmptyState icon="Package" title={t.plugins.installedEmpty} /> : null}
       {items.length > 0 ? (
         <Card>
@@ -312,6 +319,7 @@ function InstalledRow({
   busy: boolean;
   onAction: StartPlugin;
 }) {
+  const t = useToolboxText();
   const act = (action: PluginAction) => onAction(action, plugin.id, plugin.name, plugin.marketplace);
   const update = plugin.updateTo ?? null;
   const meta = [
@@ -325,7 +333,7 @@ function InstalledRow({
       title={plugin.name}
       badge={
         <>
-          <Badge label={pluginScopeLabel(ecosystem, plugin.scope)} />
+          <Badge label={pluginScopeLabel(t, ecosystem, plugin.scope)} />
           {update ? <Badge label={t.plugins.updateAvailable} tone="warning" /> : null}
           {plugin.enabled === null ? null : (
             <Badge label={plugin.enabled ? t.plugins.enabled : t.plugins.disabled} tone={plugin.enabled ? "success" : "muted"} />
@@ -333,7 +341,7 @@ function InstalledRow({
         </>
       }
       meta={meta || null}
-      detail={plugin.error ?? plugin.description}
+      detail={plugin.error ? t.diagnostic(plugin.error) : plugin.description}
       detailTone={plugin.error ? "danger" : "muted"}
       actions={
         <>
@@ -409,6 +417,7 @@ function BrowseList({
   /** All view: install state across profiles instead of the catalog profile's own flag. */
   installedIn?: (pluginId: string) => { n: number; total: number };
 }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const caps = ECOSYSTEM_CAPS[scope.ecosystem];
   const [text, setText] = useState("");
@@ -445,8 +454,8 @@ function BrowseList({
         }}
       />
       {query.isFetching ? <LoadingLine /> : null}
-      {query.isError ? <Notice tone="danger" text={`${t.plugins.loadError}: ${errorText(query.error)}`} /> : null}
-      {firstError ? <Notice tone="warning" text={firstError} /> : null}
+      {query.isError ? <Notice tone="danger" text={`${t.plugins.loadError}: ${t.diagnostic(errorText(query.error))}`} /> : null}
+      {firstError ? <Notice tone="warning" text={t.diagnostic(firstError)} /> : null}
       {query.isSuccess && !query.isFetching && items.length === 0 ? <EmptyState icon="Search" title={t.plugins.browseEmpty} /> : null}
       {total > 0 ? <SectionLabel>{t.plugins.catalogShown(items.length, total)}</SectionLabel> : null}
       {items.length > 0 ? (
@@ -490,6 +499,7 @@ function CatalogRow({
   busy: boolean;
   onAction: StartPlugin;
 }) {
+  const t = useToolboxText();
   const meta = [plugin.marketplace, plugin.categories.join(", ")].filter(Boolean).join(" · ");
   return (
     <ListRow
@@ -530,6 +540,7 @@ function MarketplaceList({
   busy: boolean;
   onAction(action: MarketplaceAction, source: string, onDone?: () => void): void;
 }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const can = ECOSYSTEM_CAPS[scope.ecosystem].marketplace;
   const query = useCatalog(scope, "");
@@ -566,8 +577,8 @@ function MarketplaceList({
       </View>
       ) : null}
       {query.isFetching ? <LoadingLine /> : null}
-      {query.isError ? <Notice tone="danger" text={`${t.plugins.loadError}: ${errorText(query.error)}`} /> : null}
-      {query.data?.error ? <Notice tone="warning" text={query.data.error} /> : null}
+      {query.isError ? <Notice tone="danger" text={`${t.plugins.loadError}: ${t.diagnostic(errorText(query.error))}`} /> : null}
+      {query.data?.error ? <Notice tone="warning" text={t.diagnostic(query.data.error)} /> : null}
       {query.isSuccess && items.length === 0 ? <EmptyState icon="Store" title={t.plugins.marketplacesEmpty} /> : null}
       {items.length > 0 ? (
         <Card>
@@ -608,7 +619,7 @@ interface PluginRow {
   entries: Map<string, InstalledPlugin>;
 }
 
-function pluginColor(p: ReturnType<typeof useLook>["p"], plugin: InstalledPlugin): { color: string; label: string } {
+function pluginColor(t: Strings, p: ReturnType<typeof useLook>["p"], plugin: InstalledPlugin): { color: string; label: string } {
   if (plugin.error) return { color: p.danger, label: t.strip.error };
   if (plugin.updateTo) return { color: p.warning, label: t.plugins.updateAvailable };
   if (plugin.enabled === false) return { color: p.idle, label: t.plugins.disabled };
@@ -626,6 +637,7 @@ function AllPlugins({
   cwd: string | null;
   flow: ActionFlow;
 }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const [section, setSection] = useState<Section>("installed");
   const caps = ECOSYSTEM_CAPS[ecosystem];
@@ -655,11 +667,11 @@ function AllPlugins({
       return;
     }
     if (q.isError) {
-      errors.push({ profile, text: errorText(q.error) });
+      errors.push({ profile, text: t.diagnostic(errorText(q.error)) });
       return;
     }
     loaded.add(profile.id);
-    if (q.data.error) errors.push({ profile, text: q.data.error });
+    if (q.data.error) errors.push({ profile, text: t.diagnostic(q.data.error) });
     for (const plugin of q.data.plugins) {
       const row = rows.get(plugin.id) ?? {
         id: plugin.id,
@@ -684,7 +696,7 @@ function AllPlugins({
       return { kind: "unknown", label: loading.includes(profile) ? t.strip.loading : t.strip.unlisted };
     }
     const entry = row.entries.get(profile.id);
-    return entry ? { kind: "present", ...pluginColor(p, entry) } : { kind: "absent" };
+    return entry ? { kind: "present", ...pluginColor(t, p, entry) } : { kind: "absent" };
   };
 
   const authNote = (profile: Profile): string | null =>
@@ -749,7 +761,7 @@ function AllPlugins({
       {notInstalled.length > 0 ? <Notice text={t.profile.skippedProfiles(notInstalled.map((x) => x.label).join(", "))} /> : null}
       {section === "installed" ? (
         <View style={{ gap: 8 }}>
-          {loading.length > 0 ? <LoadingLine label={t.profile.loadingProfiles(loading.map(shortLabel).join(", "))} /> : null}
+          {loading.length > 0 ? <LoadingLine label={t.profile.loadingProfiles(loading.map((profile) => shortLabel(t, profile)).join(", "))} /> : null}
           {errors.map((e) => (
             <Notice key={e.profile.id} tone="warning" text={`${e.profile.label}: ${e.text}`} />
           ))}
@@ -763,9 +775,10 @@ function AllPlugins({
                 const updates = entries.filter((x) => x.updateTo);
                 const versions = [...new Set(entries.map((x) => x.version).filter(Boolean))].map((v) => `v${v}`);
                 const errorsOf = profiles
-                  .map((x) => ({ x, e: row.entries.get(x.id)?.error }))
-                  .filter(({ e }) => !!e)
-                  .map(({ x, e }) => `${shortLabel(x)}: ${e}`);
+                  .flatMap((profile) => {
+                    const error = row.entries.get(profile.id)?.error;
+                    return error ? [`${shortLabel(t, profile)}: ${t.diagnostic(error)}`] : [];
+                  });
                 return (
                   <ListRow
                     key={row.id}
@@ -773,7 +786,7 @@ function AllPlugins({
                     title={row.name}
                     badge={
                       <>
-                        {[...new Set(entries.map((x) => pluginScopeLabel(ecosystem, x.scope)))].map((label) => (
+                        {[...new Set(entries.map((x) => pluginScopeLabel(t, ecosystem, x.scope)))].map((label) => (
                           <Badge key={label} label={label} />
                         ))}
                         {updates.length > 0 ? <Badge label={t.plugins.updateAvailable} tone="warning" /> : null}

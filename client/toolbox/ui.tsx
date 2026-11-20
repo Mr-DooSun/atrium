@@ -7,7 +7,7 @@ import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { MCP_SCOPES, type AuthState, type Ecosystem, type McpServer, type Profile, type ProviderKind } from "../../shared/toolbox/types";
 import { ROW, type Palette } from "../look";
 import { providerMark } from "../provider-icons";
-import { t } from "./strings";
+import { useToolboxText, type Strings } from "./strings";
 
 export const MONO = "Menlo";
 export const RADIUS = 8;
@@ -354,6 +354,7 @@ export function ProfileSwitcher({
   refreshing: boolean;
   withAll?: boolean;
 }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const allActive = value === ALL_PROFILES;
   return (
@@ -462,12 +463,13 @@ export function Notice({ text, tone = "muted" }: { text: string; tone?: "muted" 
   );
 }
 
-export function LoadingLine({ label = t.common.loading }: { label?: string }) {
+export function LoadingLine({ label }: { label?: string }) {
+  const t = useToolboxText();
   const { p } = useLook();
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 36 }}>
       <ActivityIndicator size="small" color={p.muted} />
-      <Text style={{ color: p.muted, fontSize: 13 }}>{label}</Text>
+      <Text style={{ color: p.muted, fontSize: 13 }}>{label ?? t.common.loading}</Text>
     </View>
   );
 }
@@ -504,6 +506,7 @@ export function BackBar({
   hostId: string;
   navigation: PluginScreenProps["navigation"];
 }) {
+  const t = useToolboxText();
   const { p, compact } = useLook();
   if (!agentId || !navigation) return null;
   return (
@@ -543,7 +546,7 @@ export function BackBar({
 
 /** Short name of a profile for dense strips: "기본" for the built-in provider, else the id
  *  without its kind prefix ("claude-pb1" -> "pb1"). */
-export function shortLabel(profile: Profile): string {
+export function shortLabel(t: Strings, profile: Profile): string {
   if (profile.id === profile.kind) return t.common.default;
   const prefix = `${profile.kind}-`;
   return profile.id.startsWith(prefix) && profile.id.length > prefix.length ? profile.id.slice(prefix.length) : profile.label;
@@ -559,6 +562,7 @@ export type Presence = { kind: "present"; color: string; label: string } | { kin
 
 /** One chip per profile: provider mark, short label and a status dot (hollow = not there). */
 export function ProfileStrip({ items }: { items: readonly { profile: Profile; presence: Presence }[] }) {
+  const t = useToolboxText();
   const { p } = useLook();
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
@@ -583,7 +587,7 @@ export function ProfileStrip({ items }: { items: readonly { profile: Profile; pr
           >
             <ProviderGlyph provider={profile.id} size={11} />
             <Text numberOfLines={1} style={{ color: p.muted, fontSize: 11, maxWidth: 96 }}>
-              {shortLabel(profile)}
+              {shortLabel(t, profile)}
             </Text>
             {presence.kind === "present" ? (
               <Dot color={presence.color} />
@@ -670,7 +674,7 @@ export const SHARED_SCOPES: readonly string[] = ["project"];
 
 /** Where an MCP server's definition lives, in words. Kind-agnostic: a CLI without scopes has one
  *  account-wide config. Null scope from a CLI that has scopes means its list did not say. */
-export function mcpScopeLabel(kind: ProviderKind, server: Pick<McpServer, "scope" | "name">): string {
+export function mcpScopeLabel(t: Strings, kind: ProviderKind, server: Pick<McpServer, "scope" | "name">): string {
   const scope = server.scope?.toLowerCase() ?? null;
   if (scope === "plugin" || (scope === null && server.name.startsWith("plugin:"))) return t.scope.plugin;
   if (scope === "user" || scope === "global") return t.scope.account;
@@ -684,7 +688,7 @@ export function mcpScopeLabel(kind: ProviderKind, server: Pick<McpServer, "scope
 
 /** Plugins carry no scope in the contract: Paseo plugins are daemon-wide and a CLI without
  *  MCP scopes keeps one account-wide config; otherwise the list does not say. */
-export function pluginScopeLabel(ecosystem: Ecosystem, scope?: string | null): string {
+export function pluginScopeLabel(t: Strings, ecosystem: Ecosystem, scope?: string | null): string {
   if (ecosystem === "paseo") return t.scope.paseo;
   const s = scope?.toLowerCase() ?? null;
   if (s === "user") return t.scope.account;
@@ -697,6 +701,7 @@ export function pluginScopeLabel(ecosystem: Ecosystem, scope?: string | null): s
 
 /** One line under the profile switcher: which project the lists are for. */
 export function ScopeBasis({ cwd }: { cwd: string | null }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const name = cwd ? (cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd) : null;
   return (

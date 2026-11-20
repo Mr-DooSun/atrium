@@ -10,7 +10,7 @@ import { MCP_SCOPES, type McpAddInput, type McpServer, type Profile, type Provid
 import { palette } from "../look";
 import { useActionFlow, type ActionFlow, type ActionTarget } from "./action-flow";
 import { keys, useProfiles } from "./queries";
-import { t } from "./strings";
+import { ToolboxTextProvider, useToolboxStrings, useToolboxText, type Strings } from "./strings";
 import {
   ALL_PROFILES,
   Badge,
@@ -44,19 +44,22 @@ import {
 } from "./ui";
 
 export function McpScreen({ theme, layout, host, params, navigation }: PluginScreenProps) {
+  const strings = useToolboxStrings();
   const look = useMemo(() => ({ p: palette(theme.colors), compact: layout.compact }), [theme, layout.compact]);
   return (
-    <LookProvider value={look}>
-      <View style={{ flex: 1 }}>
-        <BackBar agentId={params.agentId} title={params.agentTitle} hostId={host.id} navigation={navigation} />
-        <McpBody hostId={host.id} params={params} />
-      </View>
-    </LookProvider>
+    <ToolboxTextProvider value={strings}>
+      <LookProvider value={look}>
+        <View style={{ flex: 1 }}>
+          <BackBar agentId={params.agentId} title={params.agentTitle} hostId={host.id} navigation={navigation} />
+          <McpBody hostId={host.id} params={params} />
+        </View>
+      </LookProvider>
+    </ToolboxTextProvider>
   );
 }
 
-
 function McpBody({ hostId, params }: { hostId: string; params: Record<string, string> }) {
+  const t = useToolboxText();
   const { query: profilesQuery, refresh, refreshing } = useProfiles();
   const profiles = profilesQuery.data?.profiles ?? [];
   const cwd = params.cwd ? params.cwd : null;
@@ -89,7 +92,7 @@ function McpBody({ hostId, params }: { hostId: string; params: Record<string, st
       />
       {profilesQuery.isPending ? <LoadingLine /> : null}
       {profilesQuery.isError ? (
-        <Notice tone="danger" text={`${t.profile.loadError}: ${errorText(profilesQuery.error)}`} />
+        <Notice tone="danger" text={`${t.profile.loadError}: ${t.diagnostic(errorText(profilesQuery.error))}`} />
       ) : null}
       {unknown && requested ? <Notice tone="warning" text={t.profile.unmanaged(requested)} /> : null}
       {profilesQuery.isSuccess && ofKind.length === 0 ? (
@@ -119,6 +122,7 @@ function McpBody({ hostId, params }: { hostId: string; params: Record<string, st
 }
 
 function ProfileServers({ profile, cwd, flow }: { profile: Profile; cwd: string | null; flow: ActionFlow }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const list = useRpc(listMcp);
   const preview = useRpc(previewMcpAdd);
@@ -210,11 +214,11 @@ function ProfileServers({ profile, cwd, flow }: { profile: Profile; cwd: string 
           badge={
             <>
               <Badge label={t.mcp.status[server.status]} tone={statusTone(server.status)} />
-              <Badge label={mcpScopeLabel(profile.kind, server)} />
+              <Badge label={mcpScopeLabel(t, profile.kind, server)} />
             </>
           }
           meta={[server.transport, server.target].filter(Boolean).join(" · ") || null}
-          detail={server.detail}
+          detail={server.detail && t.diagnostic(server.detail)}
           detailTone={server.status === "failed" ? "danger" : "muted"}
           actions={
             <>
@@ -239,8 +243,8 @@ function ProfileServers({ profile, cwd, flow }: { profile: Profile; cwd: string 
         {servers.isSuccess ? t.mcp.count(items.length) : t.mcp.servers}
       </SectionLabel>
       {servers.isPending ? <LoadingLine /> : null}
-      {servers.isError ? <Notice tone="danger" text={`${t.mcp.loadError}: ${errorText(servers.error)}`} /> : null}
-      {servers.data?.error ? <Notice tone="warning" text={servers.data.error} /> : null}
+      {servers.isError ? <Notice tone="danger" text={`${t.mcp.loadError}: ${t.diagnostic(errorText(servers.error))}`} /> : null}
+      {servers.data?.error ? <Notice tone="warning" text={t.diagnostic(servers.data.error)} /> : null}
       {servers.isSuccess && items.length === 0 ? <EmptyState icon="Plug" title={t.mcp.empty} /> : null}
       {items.length > 0 ? (
         <TextInput
@@ -314,7 +318,7 @@ type ListState = "ok" | "loading" | "error";
 const byName = (a: { name: string }, b: { name: string }) =>
   a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
 
-function authNote(profile: Profile): string | null {
+function authNote(t: Strings, profile: Profile): string | null {
   if (profile.auth.state === "logged_out") return t.targets.noteLoggedOut;
   if (profile.auth.state === "not_installed") return t.targets.noteNotInstalled;
   return null;
@@ -344,6 +348,7 @@ interface BulkForm {
 }
 
 function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd: string | null; flow: ActionFlow }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const list = useRpc(listMcp);
   const preview = useRpc(previewMcpAdd);
@@ -376,11 +381,11 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
     }
     if (q.isError) {
       state.set(profile.id, "error");
-      listError.set(profile.id, errorText(q.error));
+      listError.set(profile.id, t.diagnostic(errorText(q.error)));
       return;
     }
     state.set(profile.id, "ok");
-    if (q.data.error) listError.set(profile.id, q.data.error);
+    if (q.data.error) listError.set(profile.id, t.diagnostic(q.data.error));
     const rows = rowsByKind.get(profile.kind) ?? new Map<string, ServerRow>();
     rowsByKind.set(profile.kind, rows);
     for (const server of q.data.servers) {
@@ -416,7 +421,7 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
       label: profile.label,
       provider: profile.id,
       disabled: !bulkSelectable(profile) || (has ? has.entries.has(profile.id) : false),
-      note: authNote(profile) ?? (has?.entries.has(profile.id) ? t.targets.noteHas : null),
+      note: authNote(t, profile) ?? (has?.entries.has(profile.id) ? t.targets.noteHas : null),
     }));
 
   const openAdd = (kind: ProviderKind, from?: { row: ServerRow; server: McpServer }) => {
@@ -524,7 +529,7 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
           label: profile.label,
           selectable: removable,
           preselected: removable && profile.auth.state === "logged_in",
-          note: authNote(profile) ?? (entry ? null : t.targets.noteMissing),
+          note: authNote(t, profile) ?? (entry ? null : t.targets.noteMissing),
           preview: null,
           run: () => remove({ profileId: profile.id, cwd, name: row.name, scope: entry?.scope ?? null }),
           reloadProvider: profile.id,
@@ -544,14 +549,15 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
         const removable = entries.some((s) => s.scope !== "plugin");
         const failed = ofKind
           .map((x) => ({ x, s: row.entries.get(x.id) }))
-          .filter(({ s }) => s?.status === "failed" && s.detail)
-          .map(({ x, s }) => `${shortLabel(x)}: ${s!.detail}`);
+          .flatMap(({ x, s }) =>
+            s?.status === "failed" && s.detail ? [`${shortLabel(t, x)}: ${t.diagnostic(s.detail)}`] : [],
+          );
         return (
           <ListRow
             key={row.key}
             first={i === 0}
             title={row.name}
-            badge={<Badge label={mcpScopeLabel(kind, row)} />}
+            badge={<Badge label={mcpScopeLabel(t, kind, row)} />}
             meta={[first?.transport, first?.target].filter(Boolean).join(" · ") || null}
             detail={failed.length > 0 ? failed.join("\n") : null}
             detailTone="danger"
@@ -563,7 +569,7 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
                     key={x.id}
                     small
                     icon="LogIn"
-                    label={t.mcp.loginIn(shortLabel(x))}
+                    label={t.mcp.loginIn(shortLabel(t, x))}
                     onPress={() => startLogin(x, row.entries.get(x.id)!)}
                     disabled={flow.busy}
                   />
@@ -632,7 +638,7 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
             >
               {t.profile.kindHeader(t.plugins.tabs[kind], ofKind.length)}
             </SectionLabel>
-            {loading.length > 0 ? <LoadingLine label={t.profile.loadingProfiles(loading.map(shortLabel).join(", "))} /> : null}
+            {loading.length > 0 ? <LoadingLine label={t.profile.loadingProfiles(loading.map((profile) => shortLabel(t, profile)).join(", "))} /> : null}
             {errors.map((x) => (
               <Notice key={x.id} tone="warning" text={`${x.label}: ${listError.get(x.id)}`} />
             ))}
@@ -760,6 +766,7 @@ function AddServerModal({
   /** Shown above the fields (e.g. env/header values must be re-entered). */
   note?: string | null;
 }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const set = <K extends keyof McpForm>(key: K, value: McpForm[K]) => onChange({ ...form, [key]: value });
   const stdio = form.transport === "stdio";
@@ -901,6 +908,7 @@ function Input({
 
 /** Key/value rows. Values are secrets: masked while typing and never echoed back. */
 function PairsField({ label, pairs, onChange }: { label: string; pairs: Pair[]; onChange(pairs: Pair[]): void }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const update = (id: number, patch: Partial<Pair>) => onChange(pairs.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   return (
