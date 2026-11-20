@@ -1,14 +1,14 @@
 // One chat column: header (provider, title, status, actions) over the agent's timeline.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, PanResponder, Platform, Pressable, Text, View, type GestureResponderEvent, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
-import { useAgent, usePaseo, useRpc, useSubscription, useTranslation, type AgentRef } from "@getpaseo/plugin/client";
+import { useAgent, useHosts, usePaseo, useRpc, useSubscription, useTranslation, type AgentRef } from "@getpaseo/plugin/client";
 import { FlatList, Icon, Markdown, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { chatOlder, chatTimelines, type ChatItem } from "../../shared/chat/rpc";
 import { panesText } from "../chat-strings";
 import { TITLE_LINE, type Palette } from "../look";
 import { ProviderMark, StatusMark, agentBucket, isAgentTurnActive } from "../marks";
 import { readableOn } from "./layout";
-import { applyOlder, applyTimelineEvent, clearTimelineError, displayItems, errorBanner, rowWording, type AgentTimeline, type Timelines } from "./timeline";
+import { applyOlder, applyTimelineEvent, clearTimelineError, displayItems, errorBanner, rowWording, shouldAutoRetry, type AgentTimeline, type Timelines } from "./timeline";
 
 export interface PaneLink {
   /** Family color shared by every pane of the family. */
@@ -376,6 +376,17 @@ function LiveBody({
   }, [liveError, agent.id]);
   const timelineError = timeline?.error ?? null;
   const banner = errorBanner(lost, timelineError, (timeline?.items.length ?? 0) > 0);
+  // When the host comes back online (daemon restart, network drop), a pane whose subscription
+  // ended reconnects by itself, once (shouldAutoRetry). The status this body mounted with is the
+  // starting point, so the retry's own fresh body never repeats it.
+  const hostStatus = useHosts().find((h) => h.serverId === agent.hostId)?.status;
+  const prevHostStatus = useRef(hostStatus);
+  useEffect(() => {
+    const prev = prevHostStatus.current;
+    prevHostStatus.current = hostStatus;
+    if (shouldAutoRetry(prev, hostStatus, banner)) onRetry();
+    // Only a status change is a reconnect; banner and onRetry are read as of that render.
+  }, [hostStatus]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (timelineError) console.warn(`[atrium] chat pane ${agent.id}: timeline error: ${timelineError}`);
   }, [timelineError, agent.id]);

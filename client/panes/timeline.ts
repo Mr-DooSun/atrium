@@ -1,6 +1,7 @@
 // Per-agent chat rows, folded from `chatTimelines` events and `chatOlder` pages. Pure, so it can
 // be unit tested; the screen keeps one of these maps in state.
 import { COMPACTED_FALLBACK_TEXT, COMPACTING_FALLBACK_TEXT, PLUGIN_FALLBACK_TEXT, UNKNOWN_FALLBACK_TEXT } from "../../shared/chat/convert";
+import type { PluginHostSummary } from "@getpaseo/plugin/client";
 import type { ChatItem } from "../../shared/chat/rpc";
 
 export interface AgentTimeline {
@@ -175,10 +176,30 @@ export function toolStatusText(status: string | undefined, t: (key: "toolRunning
  *   retries by itself (1, 2, 5, 10, 30 s); rows are already showing, so no button.
  * - loadFailed: the same before any row arrived: the first load failed, retry offered.
  */
-export function errorBanner(lost: boolean, error: string | null, hasRows: boolean): "liveLost" | "reconnecting" | "loadFailed" | null {
+export function errorBanner(lost: boolean, error: string | null, hasRows: boolean): ErrorBanner {
   if (lost) return "liveLost";
   if (error === null) return null;
   return hasRows ? "reconnecting" : "loadFailed";
+}
+
+export type ErrorBanner = "liveLost" | "reconnecting" | "loadFailed" | null;
+
+/** A host's connection state as the app reports it (`useHosts()`); undefined when not listed. */
+export type HostStatus = PluginHostSummary["status"] | undefined;
+
+/**
+ * Whether a pane retries by itself on this host status change: only when the host comes back
+ * online from any other known state (offline, connecting, error, idle), and only for a pane
+ * whose subscription ended (liveLost). A server error (reconnecting: the server retries on its
+ * own) and a first load that failed (loadFailed) are left alone.
+ *
+ * One retry per reconnect: the caller asks on status changes only, and a retry remounts the
+ * pane's live part with the current status (online) as its starting point, so if that retry
+ * fails too, nothing more happens until the host drops and comes back again. A pane the user
+ * already retried is connecting, not liveLost, so it is not retried twice.
+ */
+export function shouldAutoRetry(prev: HostStatus, next: HostStatus, banner: ErrorBanner): boolean {
+  return banner === "liveLost" && next === "online" && prev !== undefined && prev !== "online";
 }
 
 /**
