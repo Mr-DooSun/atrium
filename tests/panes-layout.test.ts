@@ -43,3 +43,54 @@ test('persistence ignores garbage and subscriptions are bounded with 1000 panes'
  const range=L.visibleRange(ps.map(()=>400),10,200000,800,1);
  assert.ok(range.end-range.start <= 5); assert.ok(range.start>0);
 });
+
+test('saved widths preserve old format, clamp values and deduplicate pane keys', () => {
+ const ps=[p('a'),p('b'),p('c'),p('a')];
+ const old='[["host","a","a"],["host","b","b"],["host","c","c"]]';
+ assert.equal(L.serializePanes(ps),old);
+ assert.deepEqual(L.parsePanes(old),ps.slice(0,3));
+ assert.deepEqual([...L.parsePaneWidths(old)],[]);
+ const widths=new Map([['a',299.6],['b',950],['c',455.5]]);
+ const saved=L.serializePanes(ps,widths);
+ assert.equal(saved,'[["host","a","a",300],["host","b","b",900],["host","c","c",456]]');
+ assert.deepEqual(L.parsePanes(saved),ps.slice(0,3));
+ assert.deepEqual([...L.parsePaneWidths(saved)],[['a',300],['b',900],['c',456]]);
+ assert.equal(L.serializePanes([p('a')],new Map([['a',NaN]])),'[["host","a","a"]]');
+ const mixed='[["h","first","k",450.6],["h","second","k",800],["h","old","old"],["h","new","old",700],["h","str","str","600"],["h","lo","lo",1],["h","hi","hi",1000]]';
+ assert.deepEqual(L.parsePanes(mixed).map(x=>x.id),['first','old','str','lo','hi']);
+ assert.deepEqual([...L.parsePaneWidths(mixed)],[['k',451],['lo',300],['hi',900]]);
+ for(const bad of [null,undefined,'','{','null','{}','[null,[],[1,2,3]]']) {
+  assert.deepEqual(L.parsePanes(bad),[]); assert.deepEqual([...L.parsePaneWidths(bad)],[]);
+ }
+});
+
+test('width bounds round, reject non-finite and resolve without clamping',()=>{
+ assert.equal(L.PANE_MIN_WIDTH,300); assert.equal(L.PANE_MAX_WIDTH,900);
+ for(const [input,expected] of [[-1,300],[300.4,300],[300.5,301],[899.6,900],[999,900]] as const) assert.equal(L.clampPaneWidth(input),expected);
+ for(const input of [NaN,Infinity,-Infinity]) assert.equal(L.clampPaneWidth(input),null);
+ assert.deepEqual(L.resolveWidths([p('a'),p('b'),p('c')],new Map([['a',100],['b',1000]]),42),[100,1000,42]);
+});
+
+test('reorderTarget moves family blocks and clamps children within their family',()=>{
+ const ps=['a','b','c','x','y'].map(p);
+ const parentOf=(key:string)=>({b:'a',c:'a'} as Record<string,string>)[key];
+ for(const [drag,gap,expected] of [
+  ['a',5,['x','y','a','b','c']], ['a',4,['x','a','b','c','y']],
+  ['a',2,['a','b','c','x','y']], ['a',0,['a','b','c','x','y']], ['a',3,['a','b','c','x','y']],
+  ['y',1,['y','a','b','c','x']], ['y',2,['a','b','c','y','x']],
+  ['c',1,['a','c','b','x','y']], ['b',5,['a','c','b','x','y']],
+  ['y',-99,['y','a','b','c','x']], ['a',99,['x','y','a','b','c']],
+ ] as const) assert.deepEqual(keys(L.reorderTarget(ps,parentOf,drag,gap)),expected,`${drag} to ${gap}`);
+ assert.deepEqual(keys(L.reorderTarget(['b','x','a','c','y'].map(p),parentOf,'unknown',0)),['a','b','c','x','y']);
+ const even=['a','b','x'].map(p);
+ assert.deepEqual(keys(L.reorderTarget(even,parentOf,'x',1)),['x','a','b']);
+});
+
+test('edge scroll scales at edges and handles narrow or invalid viewport',()=>{
+ assert.equal(L.edgeScrollDelta(0,0,1000),-24); assert.equal(L.edgeScrollDelta(500,0,1000),0);
+ assert.equal(L.edgeScrollDelta(976,0,1000),12); assert.equal(L.edgeScrollDelta(24,0,1000),-12);
+ assert.equal(L.edgeScrollDelta(-100,0,1000),-24); assert.equal(L.edgeScrollDelta(1100,0,1000),24);
+ assert.equal(L.edgeScrollDelta(10,0,20),0); assert.equal(L.edgeScrollDelta(5,0,20),-12);
+ assert.equal(L.edgeScrollDelta(10,0,0),0); assert.equal(L.edgeScrollDelta(10,20,0),0);
+ assert.equal(L.edgeScrollDelta(0,0,100,0),0); assert.equal(L.edgeScrollDelta(0,0,100,-1),0);
+});

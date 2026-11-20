@@ -252,27 +252,56 @@ export function paneWidth(viewportWidth: number, gap: number, min = 360, max = 5
 
 // ── Persistence ────────────────────────────────────────────────────────
 
-/** Persisted form: a JSON list of `[hostId, agentId, key]`, in pane order. */
-export function serializePanes(panes: readonly PaneRef[]): string {
-  return JSON.stringify(dedupePanes(panes).map((p) => [p.hostId, p.id, p.key]));
+/**
+ * Persisted form: a JSON list of `[hostId, agentId, key]`, in pane order, with a 4th element
+ * `width` on panes that have a custom width in `widths`. Without `widths` the output is exactly
+ * the old 3-element form, so old and new data both parse with `parsePanes`.
+ */
+export function serializePanes(panes: readonly PaneRef[], widths?: ReadonlyMap<string, number>): string {
+  return JSON.stringify(
+    dedupePanes(panes).map((p) => {
+      const width = widths?.get(p.key);
+      const clamped = width === undefined ? null : clampPaneWidth(width);
+      return clamped === null ? [p.hostId, p.id, p.key] : [p.hostId, p.id, p.key, clamped];
+    }),
+  );
 }
 
-export function parsePanes(text: string | null | undefined): PaneRef[] {
+/**
+ * The custom widths stored by `serializePanes`, by pane key, clamped to
+ * [PANE_MIN_WIDTH, PANE_MAX_WIDTH]. Entries without a valid 4th element (old data, garbage)
+ * have no custom width. Never throws; bad input gives an empty map.
+ */
+export function parsePaneWidths(text: string | null | undefined): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [key, width] of parseEntries(text)) if (width !== null) out.set(key, width);
+  return out;
+}
+
+function parseEntries(text: string | null | undefined): [string, number | null, PaneRef][] {
   if (!text) return [];
+  let raw: unknown;
   try {
-    const raw: unknown = JSON.parse(text);
-    if (!Array.isArray(raw)) return [];
-    const out: PaneRef[] = [];
-    for (const entry of raw) {
-      if (!Array.isArray(entry) || entry.length < 3) continue;
-      const [hostId, id, key] = entry;
-      if (typeof hostId !== "string" || typeof id !== "string" || typeof key !== "string" || !key) continue;
-      out.push({ kind: "agent", hostId, id, key });
-    }
-    return dedupePanes(out);
+    raw = JSON.parse(text);
   } catch {
     return [];
   }
+  if (!Array.isArray(raw)) return [];
+  const out: [string, number | null, PaneRef][] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!Array.isArray(entry) || entry.length < 3) continue;
+    const [hostId, id, key, width] = entry;
+    if (typeof hostId !== "string" || typeof id !== "string" || typeof key !== "string" || !key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push([key, typeof width === "number" ? clampPaneWidth(width) : null, { kind: "agent", hostId, id, key }]);
+  }
+  return out;
+}
+
+export function parsePanes(text: string | null | undefined): PaneRef[] {
+  return parseEntries(text).map(([, , pane]) => pane);
 }
 
 /** Agent ids for the timeline subscription: unique, stable order, at most `max`. */
@@ -291,4 +320,85 @@ export function moveGroup<P extends PaneRef>(panes: readonly P[], parentOf: Pare
   if (at < 0 || to < 0 || to >= groups.length) return groups.flatMap((g) => g.panes);
   [groups[at], groups[to]] = [groups[to], groups[at]];
   return groups.flatMap((g) => g.panes);
+}
+
+// ── Per-pane widths ────────────────────────────────────────────────────
+
+export const PANE_MIN_WIDTH = 300;
+export const PANE_MAX_WIDTH = 900;
+
+/** Rounds and clamps to [PANE_MIN_WIDTH, PANE_MAX_WIDTH]; null for NaN/±Infinity. */
+export function clampPaneWidth(width: number): number | null {
+  if (!Number.isFinite(width)) return null;
+  return Math.min(PANE_MAX_WIDTH, Math.max(PANE_MIN_WIDTH, Math.round(width)));
+}
+
+/** Each pane's width: its custom width from `widths` if any, else `defaultWidth`. */
+export function resolveWidths(panes: readonly PaneRef[], widths: ReadonlyMap<string, number>, defaultWidth: number): number[] {
+  return panes.map((p) => widths.get(p.key) ?? defaultWidth);
+}
+
+// ── Reordering by drag ─────────────────────────────────────────────────
+
+/**
+ * The pane list after dragging `dragKey` to the insertion gap `toIndex` (0 = before the first
+ * pane, n = after the last; positions in `arrangeByFamily(panes, parentOf)`). Always returns
+ * a list in family order.
+ *
+ * - A pane with no open ancestor (the top of its family block) moves its whole family block.
+ *   A gap inside another family block snaps to that block's nearer edge (ties go before it).
+ *   A gap inside or at the edges of its own block is a no-op.
+ * - Any other pane (a child) moves within its own family block only: the gap is clamped to the
+ *   block, then the family is re-ordered depth-first (it stays after its parent; among its
+ *   siblings it takes the dropped position).
+ * - Unknown `dragKey`: the arranged list, unchanged.
+ */
+export function reorderTarget<P extends PaneRef>(panes: readonly P[], parentOf: ParentOf, dragKey: string, toIndex: number): P[] {
+  const groups = groupByFamily(panes, parentOf);
+  const arranged = groups.flatMap((g) => g.panes);
+  const from = arranged.findIndex((p) => p.key === dragKey);
+  if (from < 0) return arranged;
+  const at = clampIndex(toIndex, arranged.length);
+
+  const blocks: { start: number; end: number; group: PaneGroup<P> }[] = [];
+  let start = 0;
+  for (const group of groups) {
+    blocks.push({ start, end: start + group.panes.length, group });
+    start += group.panes.length;
+  }
+  const own = blocks.find((b) => b.start <= from && from < b.end)!;
+  const present = new Set(arranged.map((p) => p.key));
+  const isTop = nearestPresentAncestor(dragKey, parentOf, present) === null;
+
+  if (!isTop) {
+    const gap = Math.max(own.start, Math.min(own.end, at));
+    return arrangeByFamily(addPane(arranged, arranged[from], gap), parentOf);
+  }
+
+  // Snap the gap to a block boundary.
+  let boundary = at;
+  for (const b of blocks) {
+    if (b.start < at && at < b.end) {
+      boundary = at - b.start <= b.end - at ? b.start : b.end;
+      break;
+    }
+  }
+  if (boundary >= own.start && boundary <= own.end) return arranged;
+  const moving = own.group.panes;
+  const rest = arranged.filter((_, i) => i < own.start || i >= own.end);
+  const pos = boundary > own.end ? boundary - moving.length : boundary;
+  return [...rest.slice(0, pos), ...moving, ...rest.slice(pos)];
+}
+
+/**
+ * Auto-scroll step while dragging near a horizontal edge of the viewport [left, right]:
+ * negative near the left edge, positive near the right, 0 elsewhere. Grows linearly from 0 at
+ * `edge` px inside the edge to ±`maxStep` at (or past) the edge.
+ */
+export function edgeScrollDelta(pointerX: number, left: number, right: number, edge = 48, maxStep = 24): number {
+  if (!(right > left) || edge <= 0) return 0;
+  const zone = Math.min(edge, (right - left) / 2);
+  if (pointerX < left + zone) return -Math.round(maxStep * Math.min(1, (left + zone - pointerX) / zone));
+  if (pointerX > right - zone) return Math.round(maxStep * Math.min(1, (pointerX - (right - zone)) / zone));
+  return 0;
 }

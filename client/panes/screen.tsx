@@ -21,19 +21,24 @@ import {
   addPanes,
   arrangeByFamily,
   descendantsOf,
+  edgeScrollDelta,
   groupByFamily,
   insertionIndex,
   moveGroup,
   paneOffsets,
   paneWidth,
+  PANE_MAX_WIDTH,
+  PANE_MIN_WIDTH,
   parsePanes,
   removePane,
+  reorderTarget,
+  resolveWidths,
   rootOf,
   visibleRange,
   type PaneRef,
 } from "./layout";
-import { Pane, type PaneLink } from "./pane";
-import { setPanes, usePanes } from "./store";
+import { Pane, type PaneLink, type PaneReorderHandlers } from "./pane";
+import { setPaneWidth, setPanes, usePaneWidths, usePanes } from "./store";
 
 const GAP = 12;
 const PAD = 12;
@@ -137,19 +142,40 @@ export function PanesScreen(props: PluginScreenProps) {
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [scrollX, setScrollX] = useState(0);
   const [scrollHeight, setScrollHeight] = useState(0);
+  const compact = props.layout.compact;
   const width = paneWidth(viewport.width - PAD * 2, GAP);
-  const widths = useMemo(() => arranged.map(() => width), [arranged, width]);
+  const savedWidths = usePaneWidths();
+  // Live width while a resize handle is being dragged; committed to the store on release.
+  const [resizing, setResizing] = useState<{ key: string; width: number } | null>(null);
+  const customWidths = useMemo(() => {
+    // Phones page one pane at a time: every pane takes the viewport's width.
+    if (compact) return new Map<string, number>();
+    if (!resizing) return savedWidths;
+    const next = new Map(savedWidths);
+    next.set(resizing.key, resizing.width);
+    return next;
+  }, [compact, savedWidths, resizing]);
+  const widths = useMemo(() => resolveWidths(arranged, customWidths, width), [arranged, customWidths, width]);
   const { offsets, total } = useMemo(() => paneOffsets(widths, GAP), [widths]);
   const range = visibleRange(widths, GAP, scrollX - PAD, viewport.width, 1);
-  const visible = arranged.slice(range.start, range.end);
+  // ── Reorder drag state (declared here: the dragged pane must stay mounted) ──
+  const [reordering, setReordering] = useState<string | null>(null);
+  const mounted = useMemo(() => {
+    const out = arranged.slice(range.start, range.end).map((pane, i) => ({ pane, index: range.start + i }));
+    if (reordering) {
+      const at = arranged.findIndex((x) => x.key === reordering);
+      if (at >= 0 && (at < range.start || at >= range.end)) out.push({ pane: arranged[at], index: at });
+    }
+    return out;
+  }, [arranged, range.start, range.end, reordering]);
 
   // Each mounted pane subscribes to its own timeline (pane.tsx), so scrolling only adds or
   // removes the panes that scroll in or out of view.
 
   // ── Mutations (always kept in family order) ──
   const [familyOffer, setFamilyOffer] = useState<{ agent: AgentRef; children: AgentRef[] } | null>(null);
-  const latest = useRef({ arranged, parentOf, allAgents, widths, scrollX });
-  latest.current = { arranged, parentOf, allAgents, widths, scrollX };
+  const latest = useRef({ arranged, parentOf, allAgents, widths, scrollX, contentWidth: total + PAD * 2 });
+  latest.current = { arranged, parentOf, allAgents, widths, scrollX, contentWidth: total + PAD * 2 };
 
   const open = useCallback((payload: SessionDragPayload, index?: number) => {
     const { parentOf, allAgents } = latest.current;
@@ -191,8 +217,8 @@ export function PanesScreen(props: PluginScreenProps) {
     const id = `atrium.panes.${++zoneSeq}`;
     const indexAt = (x: number) => {
       const rect = rectRef.current;
-      const { widths, scrollX } = latest.current;
-      return insertionIndex(widths, GAP, x - (rect?.x ?? 0) + scrollX - PAD);
+      const { widths } = latest.current;
+      return insertionIndex(widths, GAP, x - (rect?.x ?? 0) + scrollXRef.current - PAD);
     };
     return registerDropZone({
       id,
@@ -217,15 +243,86 @@ export function PanesScreen(props: PluginScreenProps) {
     if (!dragging) setHoverIndex(null);
   }, [dragging]);
 
+  // ── Reorder by dragging a pane's header grip ──
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const scrollXRef = useRef(0);
+  const pointerX = useRef<number | null>(null);
+  const reorderKey = useRef<string | null>(null);
+  const contentIndexAt = (pageX: number) => {
+    const rect = rectRef.current;
+    const { widths } = latest.current;
+    return insertionIndex(widths, GAP, pageX - (rect?.x ?? 0) + scrollXRef.current - PAD);
+  };
+  const indexAtRef = useRef(contentIndexAt);
+  indexAtRef.current = contentIndexAt;
+  const measureFrame = () =>
+    frameRef.current?.measureInWindow((x, y, w, h) => {
+      rectRef.current = { x, y, width: w, height: h };
+    });
+  const reorder: PaneReorderHandlers = useMemo(
+    () => ({
+      onStart: (agent, pageX) => {
+        measureFrame();
+        reorderKey.current = agent.key;
+        pointerX.current = pageX;
+        setReordering(agent.key);
+        setHoverIndex(indexAtRef.current(pageX));
+      },
+      onMove: (pageX) => {
+        pointerX.current = pageX;
+        setHoverIndex(indexAtRef.current(pageX));
+      },
+      onEnd: (pageX) => {
+        const key = reorderKey.current;
+        reorderKey.current = null;
+        pointerX.current = null;
+        setReordering(null);
+        setHoverIndex(null);
+        if (!key || pageX === null) return;
+        const to = indexAtRef.current(pageX);
+        const { parentOf } = latest.current;
+        setPanes((prev) => reorderTarget(prev, parentOf, key, to));
+      },
+    }),
+    [],
+  );
+  // Auto-scroll while the pointer is near the left or right edge.
+  useEffect(() => {
+    if (!reordering) return;
+    const timer = setInterval(() => {
+      const rect = rectRef.current;
+      const x = pointerX.current;
+      if (!rect || x === null) return;
+      const delta = edgeScrollDelta(x, rect.x, rect.x + rect.width);
+      if (delta === 0) return;
+      const max = Math.max(0, latest.current.contentWidth - rect.width);
+      const next = Math.max(0, Math.min(max, scrollXRef.current + delta));
+      if (next === scrollXRef.current) return;
+      scrollXRef.current = next;
+      scrollRef.current?.scrollTo({ x: next, animated: false });
+      setHoverIndex(indexAtRef.current(x));
+    }, 16);
+    return () => clearInterval(timer);
+  }, [reordering]);
+
+  // ── Resize from a pane's right edge ──
+  const onResize = useCallback((agent: AgentRef, next: number | null, done: boolean) => {
+    if (!done) {
+      if (next !== null) setResizing({ key: agent.key, width: Math.max(PANE_MIN_WIDTH, Math.min(PANE_MAX_WIDTH, next)) });
+      return;
+    }
+    setResizing(null);
+    setPaneWidth(agent.key, next);
+  }, []);
+
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
     setViewport((v) => (v.width === width && v.height === height ? v : { width, height }));
   };
-  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => setScrollX(e.nativeEvent.contentOffset.x);
-
-  const leading = range.start < arranged.length ? offsets[range.start] ?? 0 : 0;
-  const lastShown = range.end - 1;
-  const trailing = lastShown >= 0 && lastShown < arranged.length ? total - (offsets[lastShown] + widths[lastShown]) : 0;
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollXRef.current = e.nativeEvent.contentOffset.x;
+    setScrollX(e.nativeEvent.contentOffset.x);
+  };
   const hoverX = hoverIndex === null ? null : hoverIndex >= arranged.length ? total + GAP / 2 : (offsets[hoverIndex] ?? 0) - GAP / 2;
 
   return (
@@ -269,22 +366,25 @@ export function PanesScreen(props: PluginScreenProps) {
         </View>
       ) : (
         <ScrollView
+          ref={scrollRef}
           horizontal
+          scrollEnabled={!reordering && !resizing}
           onScroll={onScroll}
           onLayout={(e) => setScrollHeight(e.nativeEvent.layout.height)}
           scrollEventThrottle={32}
-          snapToInterval={props.layout.compact ? width + GAP : undefined}
-          decelerationRate={props.layout.compact ? "fast" : undefined}
+          snapToInterval={compact ? width + GAP : undefined}
+          decelerationRate={compact ? "fast" : undefined}
           style={{ flex: 1 }}
           contentContainerStyle={{ padding: PAD, gap: 0 }}
         >
-          <View style={{ flexDirection: "row", height: Math.max(240, scrollHeight - PAD * 2) }}>
-            {leading > 0 ? <View style={{ width: leading }} /> : null}
-            {visible.map((pane, i) => (
-              <View key={pane.key} style={{ marginLeft: i === 0 ? 0 : GAP }}>
+          {/* Panes sit at their offsets, so any subset can mount: the visible ones plus the one
+              being dragged, which must not unmount mid-gesture. */}
+          <View style={{ width: total, height: Math.max(240, scrollHeight - PAD * 2) }}>
+            {mounted.map(({ pane, index }) => (
+              <View key={pane.key} style={{ position: "absolute", left: offsets[index], top: 0, bottom: 0, width: widths[index] }}>
                 <Pane
                   agent={toRef(pane)}
-                  width={width}
+                  width={widths[index]}
                   gap={GAP}
                   p={p}
                   link={linkOf.get(pane.key) ?? { color: p.guide, size: 1, index: 0, depth: 0, parent: null }}
@@ -292,10 +392,12 @@ export function PanesScreen(props: PluginScreenProps) {
                   onClose={onClose}
                   onOpen={onOpen}
                   onMoveFamily={onMoveFamily}
+                  reorder={arranged.length > 1 ? reorder : undefined}
+                  onResize={compact ? undefined : onResize}
+                  dragging={reordering === pane.key}
                 />
               </View>
             ))}
-            {trailing > 0 ? <View style={{ width: trailing }} /> : null}
             {hoverX !== null ? (
               <View
                 pointerEvents="none"

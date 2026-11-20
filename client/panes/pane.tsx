@@ -1,6 +1,6 @@
 // One chat column: header (provider, title, status, actions) over the agent's timeline.
 import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, Text, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
+import { ActivityIndicator, PanResponder, Platform, Pressable, Text, View, type GestureResponderEvent, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
 import { useAgent, usePaseo, useRpc, useSubscription, useTranslation, type AgentRef } from "@getpaseo/plugin/client";
 import { FlatList, Icon, Markdown, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { chatOlder, chatTimelines, type ChatItem } from "../../shared/chat/rpc";
@@ -32,6 +32,19 @@ export interface PaneProps {
   onClose(agent: AgentRef): void;
   onOpen(agent: AgentRef): void;
   onMoveFamily(agent: AgentRef, delta: -1 | 1): void;
+  /** Drag-to-reorder from the header grip, in page coordinates. Omitted: no grip. */
+  reorder?: PaneReorderHandlers;
+  /** Live resize from the right-edge handle; null resets to the default width. Omitted: no handle. */
+  onResize?(agent: AgentRef, width: number | null, done: boolean): void;
+  /** This pane is the one being dragged. */
+  dragging?: boolean;
+}
+
+export interface PaneReorderHandlers {
+  onStart(agent: AgentRef, pageX: number): void;
+  onMove(pageX: number): void;
+  /** null: the gesture was cancelled. */
+  onEnd(pageX: number | null): void;
 }
 
 export const PANE_BAND = 24;
@@ -48,6 +61,9 @@ export const Pane = memo(function Pane({
   onClose,
   onOpen,
   onMoveFamily,
+  reorder,
+  onResize,
+  dragging,
 }: PaneProps) {
   const { t } = useTranslation(panesText);
   const info = useAgent(agent, (a) => ({
@@ -62,10 +78,8 @@ export const Pane = memo(function Pane({
   const first = link.index === 0;
   const last = link.index === link.size - 1;
 
-  // Newest first for the inverted list: it starts at the bottom and grows upward.
-
   return (
-    <View style={{ width, height: "100%" }}>
+    <View style={{ width, height: "100%", opacity: dragging ? 0.45 : 1 }}>
       {/* Family band: one color across the whole family, bridging the gaps between its panes. */}
       <View style={{ height: PANE_BAND, justifyContent: "center" }}>
         {linked ? (
@@ -105,6 +119,7 @@ export const Pane = memo(function Pane({
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: p.guide }}>
+          {reorder ? <DragGrip agent={agent} handlers={reorder} label={first ? t("dragFamily") : t("drag")} p={p} /> : null}
           <View style={{ paddingLeft: Math.min(link.depth, 4) * 6 }}>
             <ProviderMark provider={info?.provider ?? ""} p={p} />
           </View>
@@ -133,9 +148,135 @@ export const Pane = memo(function Pane({
           <PaneBody agent={agent} p={p} />
         )}
       </View>
+      {onResize ? <ResizeHandle agent={agent} width={width} gap={gap} onResize={onResize} label={t("resize")} p={p} /> : null}
     </View>
   );
 });
+
+function pageXOf(e: GestureResponderEvent): number {
+  return e.nativeEvent.pageX;
+}
+
+/** Header grip: press and drag sideways to move the pane (a family's first pane moves the family). */
+function DragGrip({ agent, handlers, label, p }: { agent: AgentRef; handlers: PaneReorderHandlers; label: string; p: Palette }) {
+  const latest = useRef({ agent, handlers });
+  latest.current = { agent, handlers };
+  const lastX = useRef(0);
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: (e) => {
+          lastX.current = pageXOf(e);
+          latest.current.handlers.onStart(latest.current.agent, lastX.current);
+        },
+        onPanResponderMove: (e) => {
+          lastX.current = pageXOf(e);
+          latest.current.handlers.onMove(lastX.current);
+        },
+        onPanResponderRelease: () => latest.current.handlers.onEnd(lastX.current),
+        onPanResponderTerminate: () => latest.current.handlers.onEnd(null),
+      }),
+    [],
+  );
+  const [hovered, setHovered] = useState(false);
+  return (
+    <View
+      {...responder.panHandlers}
+      accessible
+      accessibilityLabel={label}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      style={{ width: 14, height: TITLE_LINE, marginLeft: -4, alignItems: "center", justifyContent: "center", borderRadius: 4, backgroundColor: hovered ? p.hover : "transparent", cursor: "grab" } as object}
+    >
+      <Icon name="GripVertical" size={13} color={p.muted} />
+    </View>
+  );
+}
+
+const DOUBLE_TAP_MS = 300;
+
+/** Thin handle on the right edge: drag to resize, double-click/tap to reset. */
+function ResizeHandle({
+  agent,
+  width,
+  gap,
+  onResize,
+  label,
+  p,
+}: {
+  agent: AgentRef;
+  width: number;
+  gap: number;
+  onResize(agent: AgentRef, width: number | null, done: boolean): void;
+  label: string;
+  p: Palette;
+}) {
+  const latest = useRef({ agent, width, onResize });
+  latest.current = { agent, width, onResize };
+  const start = useRef(0);
+  const lastTap = useRef(0);
+  const [active, setActive] = useState(false);
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          start.current = latest.current.width;
+          setActive(true);
+        },
+        onPanResponderMove: (_e, g) => latest.current.onResize(latest.current.agent, start.current + g.dx, false),
+        onPanResponderRelease: (_e, g) => {
+          setActive(false);
+          const { agent, onResize } = latest.current;
+          if (Math.abs(g.dx) < 3) {
+            const now = Date.now();
+            if (now - lastTap.current < DOUBLE_TAP_MS) {
+              lastTap.current = 0;
+              onResize(agent, null, true);
+            } else {
+              lastTap.current = now;
+              onResize(agent, start.current, true);
+            }
+            return;
+          }
+          onResize(agent, start.current + g.dx, true);
+        },
+        onPanResponderTerminate: () => {
+          setActive(false);
+          latest.current.onResize(latest.current.agent, start.current, true);
+        },
+      }),
+    [],
+  );
+  const [hovered, setHovered] = useState(false);
+  const lit = active || hovered;
+  return (
+    <View
+      {...responder.panHandlers}
+      accessible
+      accessibilityLabel={label}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      style={{
+        position: "absolute",
+        top: PANE_BAND,
+        bottom: 0,
+        right: -(gap / 2) - 4,
+        width: 8,
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "col-resize",
+      } as object}
+    >
+      <View style={{ width: lit ? 3 : 1, height: lit ? "100%" : 32, borderRadius: 2, backgroundColor: lit ? p.running : p.guide }} />
+    </View>
+  );
+}
 
 /** Only mounted when the agent has a parent pane, so useAgent never sees an empty ref. */
 function ParentLine({ parent, p }: { parent: AgentRef; p: Palette }) {

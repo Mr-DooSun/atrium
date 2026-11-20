@@ -21,6 +21,8 @@ import { chatText } from "./chat-strings";
 import { ROW, TITLE_LINE, type Palette } from "./look";
 import { ProviderMark, StatusMark, agentBucket, isAgentTurnActive } from "./marks";
 import { ArchiveButton, ArchiveModal, useArchive, NO_EMPTIED, type ArchiveTarget } from "./archive";
+import { PanesButton, SessionMenu } from "./project-order";
+import { openInPanes } from "./panes/drop-bus";
 
 /** Rows shown before "show more"; the list scrolls inside its own box past this. */
 const VISIBLE = 5;
@@ -196,6 +198,7 @@ function ChatRow({
     workspace: a.workspace,
   }));
   const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   // A chat alone in its workspace takes the workspace with it, so no empty rows pile up; one
   // that shares a workspace with other agents goes alone.
   const alone = agent ? !sharedWorkspaces.has(agent.workspace.key) : false;
@@ -213,8 +216,18 @@ function ChatRow({
   const active = view.active.agent?.key === reference.key;
   const bucket = agentBucket(agent);
   const canArchive = !isAgentTurnActive(agent.status);
+  const openPanes = () => openInPanes({ kind: "atrium.session", agent: reference, title: agent.label });
   return (
     <>
+      {/* Long press (compact layouts have no hover) offers the same actions as the hover buttons. */}
+      <SessionMenu
+        name={agent.label}
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onOpenInPanes={openPanes}
+        onArchive={canArchive ? archive.begin : undefined}
+        p={p}
+      />
       {target ? (
         <ArchiveModal state={archive} title={agent.label} target={target} descendants={0} danger={false} p={p} />
       ) : null}
@@ -222,7 +235,7 @@ function ChatRow({
         accessibilityRole="button"
         accessibilityLabel={`Open ${agent.label}`}
         onPress={() => view.navigation.openAgent(reference)}
-        onLongPress={canArchive ? archive.begin : undefined}
+        onLongPress={() => setMenuOpen(true)}
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
         style={({ pressed }) => ({
@@ -252,8 +265,11 @@ function ChatRow({
         >
           {agent.label}
         </Text>
-        {hovered && canArchive && !archive.confirming ? (
-          <ArchiveButton onPress={archive.begin} p={p} />
+        {hovered && !archive.confirming ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+            <PanesButton onPress={openPanes} p={p} />
+            {canArchive ? <ArchiveButton onPress={archive.begin} p={p} /> : null}
+          </View>
         ) : (
           <StatusMark bucket={bucket} p={p} />
         )}
