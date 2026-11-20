@@ -3,7 +3,7 @@
 // contain no install commands (the registry validator rejects them anywhere in an overview).
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { extname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 
 const root = resolve(import.meta.dirname, "..");
@@ -96,6 +96,47 @@ test("relative links and images in the docs point at existing files", () => {
     for (const target of targets) {
       const path = decodeURI(target.split("#")[0]);
       if (!existsSync(join(root, path))) problems.push(`${name}: ${target}`);
+    }
+  }
+  assert.deepEqual(problems, []);
+});
+
+/** GitHub-style heading anchors of a markdown file (duplicates get -1, -2, ...; code fences skipped). */
+function anchorsOf(file: string): Set<string> {
+  const anchors = new Set<string>();
+  const seen = new Map<string, number>();
+  let fence = false;
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    const heading = !fence && /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!heading) continue;
+    const text = heading[1].replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/<[^>]+>/g, "").replace(/[`*]/g, "");
+    const base = text.trim().toLowerCase().replace(/[^\p{L}\p{N}\p{M}_\- ]/gu, "").replace(/ /g, "-");
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    anchors.add(n ? `${base}-${n}` : base);
+  }
+  return anchors;
+}
+
+test("heading anchor slugs follow GitHub's rules", () => {
+  const anchors = anchorsOf(join(root, "OVERVIEW.md"));
+  assert.ok(anchors.size > 0, "OVERVIEW.md has headings");
+  for (const anchor of anchors) assert.match(anchor, /^[\p{L}\p{N}\p{M}_-]+$/u, anchor);
+});
+
+test("#anchor links into markdown files point at an existing heading", () => {
+  const problems: string[] = [];
+  for (const name of ["README.md", ...overviews]) {
+    const text = readFileSync(join(root, name), "utf8");
+    const targets = [...text.matchAll(/!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g), ...text.matchAll(/href="([^"]+)"/g)]
+      .map((m) => m[1])
+      .filter((target) => target.includes("#") && !/^[a-z][a-z0-9+.-]*:/i.test(target));
+    for (const target of targets) {
+      const [path, anchor] = target.split("#");
+      const file = path ? join(dirname(join(root, name)), decodeURI(path)) : join(root, name);
+      if (!file.endsWith(".md") || !existsSync(file)) continue;
+      if (!anchorsOf(file).has(decodeURIComponent(anchor).toLowerCase())) problems.push(`${name}: ${target}`);
     }
   }
   assert.deepEqual(problems, []);
