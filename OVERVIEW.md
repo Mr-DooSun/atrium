@@ -29,7 +29,7 @@ In an agent chat, `/mcp` and `/plugins` open full screens in place of the provid
 - `/mcp` lists, adds and removes MCP servers for Claude Code, Codex and Antigravity. For a server that needs a login, it shows how to sign in with that CLI.
 - `/plugins` has a tab per ecosystem. The Paseo, Claude Code and Codex catalogs can be searched, filtered by category and sorted, and each plugin opens a detail page. The Installed tab shows what has an update or an error.
 - Every tab installs and removes plugins. Claude Code and Paseo also enable, disable and update them (for Paseo plugins installed from the registry, the update is shown as a terminal command), and Antigravity enables and disables them. You can also install from a source you enter: a git repository, npm package or local folder for Paseo, a GitHub URL or local folder for Antigravity, or a marketplace not added yet for Claude Code.
-- Each account is its own profile, and one change can run on several profiles. Every change, including adding, removing and updating marketplaces, first shows the exact command for each profile, its source and any warnings, and runs only after you confirm.
+- Each account is its own profile, and one change can run on several profiles. Every change asks for confirmation first. Plugin and marketplace changes and MCP additions also show the exact command for each profile, its source and any warnings; removing an MCP server shows a warning instead of a command.
 
 ## Setup
 

@@ -5,7 +5,7 @@
   "translations": {
     "zh-CN": {
       "name": "Atrium",
-      "description": "在 Paseo 中同时运行多个代理也不迷路：子代理嵌套在父代理之下，聊天并排打开。"
+      "description": "在 Paseo 中同时运行多个代理，也能理清头绪：子代理嵌套在父代理之下，聊天可以并排打开。"
     }
   },
   "icon": "assets/icon.png",
