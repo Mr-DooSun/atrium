@@ -61,12 +61,17 @@ export function StatusMark({ bucket, p }: { bucket: Bucket; p: Palette }) {
   );
 }
 
+export function isAgentTurnActive(status: PluginAgentSnapshot["status"]) {
+  return status === "running" || status === "initializing";
+}
+
 export function agentBucket(
   a: Pick<PluginAgentSnapshot, "status" | "requiresAttention" | "attentionReason">,
+  hasPendingPermission = false,
 ): Bucket {
   if (a.status === "error" || a.attentionReason === "error") return "failed";
-  if (a.status === "running" || a.status === "initializing") return "running";
-  if (a.requiresAttention && a.attentionReason === "permission") return "needs_input";
+  if (hasPendingPermission || (a.requiresAttention && a.attentionReason === "permission")) return "needs_input";
+  if (isAgentTurnActive(a.status)) return "running";
   if (a.requiresAttention && a.attentionReason === "finished") return "attention";
   return "done";
 }

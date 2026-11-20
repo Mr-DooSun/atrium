@@ -8,7 +8,8 @@ import { useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { usePaseo } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import type { ActionPreview, CommandResult } from "../../shared/toolbox/types";
-import { t } from "./strings";
+import { PASEO_PLUGIN_TRUST_WARNING } from "../../shared/toolbox/warnings";
+import { useToolboxText } from "./strings";
 import { Button, CodeBlock, LoadingLine, Notice, ProviderGlyph, TargetPicker, errorText, useLook } from "./ui";
 
 interface ActionBase {
@@ -224,6 +225,7 @@ function FlowModal({
   onPicked(): void;
   onPick(selected: string[]): void;
 }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const { action } = phase;
   const secrets = action.secrets ?? [];
@@ -319,22 +321,24 @@ function ConfirmBody({
   onClose(): void;
   onConfirm(): void;
 }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const secrets = action.secrets ?? [];
   const running = done !== null;
   const toRun = items.filter(runnable);
   const localWarnings = action.localWarnings ?? [];
+  const hasPaseoTrustWarning = items.some(({ preview }) => preview?.warnings.includes(PASEO_PLUGIN_TRUST_WARNING));
   const sharedWarnings = action.single ? [...(items[0]?.preview?.warnings ?? []), ...localWarnings] : localWarnings;
 
   const plan = (item: Planned) => {
     const { preview } = item;
     return (
       <>
-        {item.error ? <Notice tone="danger" text={`${t.flow.previewFailed}: ${mask(item.error, secrets)}`} /> : null}
+        {item.error ? <Notice tone="danger" text={`${t.flow.previewFailed}: ${t.diagnostic(mask(item.error, secrets))}`} /> : null}
         {!item.error ? (
           <Field label={t.flow.command}>
             {preview && preview.command.length > 0 ? (
-              <CommandView command={preview.command} secrets={secrets} />
+              <CommandView command={preview.command} relativeHome={preview.relativeHome} secrets={secrets} />
             ) : (
               <Text style={{ color: p.muted, fontSize: 13 }}>{t.flow.commandUnknown}</Text>
             )}
@@ -350,7 +354,7 @@ function ConfirmBody({
         {!action.single && preview && preview.warnings.length > 0 ? (
           <View style={{ gap: 6 }}>
             {preview.warnings.map((w, i) => (
-              <Notice key={i} tone="warning" text={mask(w, secrets)} />
+              <Notice key={i} tone="warning" text={t.diagnostic(mask(w, secrets))} />
             ))}
           </View>
         ) : null}
@@ -391,13 +395,13 @@ function ConfirmBody({
         <Field label={t.flow.warnings}>
           <View style={{ gap: 6 }}>
             {sharedWarnings.map((w, i) => (
-              <Notice key={i} tone="warning" text={mask(w, secrets)} />
+              <Notice key={i} tone="warning" text={t.diagnostic(mask(w, secrets))} />
             ))}
           </View>
         </Field>
       ) : null}
       {!action.single && toRun.length > 1 ? <Text style={{ color: p.muted, fontSize: 12 }}>{t.flow.sequential}</Text> : null}
-      {action.bringsCode ? <Notice tone="warning" text={t.flow.unsandboxed} /> : null}
+      {action.bringsCode && !hasPaseoTrustWarning ? <Notice tone="warning" text={t.flow.unsandboxed} /> : null}
       <Footer>
         <Button label={t.common.cancel} onPress={onClose} disabled={running} />
         <Button
@@ -426,6 +430,7 @@ function ResultBody({
   onClose(): void;
   secrets: readonly string[];
 }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const okCount = results.filter((r) => r.result.ok).length;
   // Every touched profile that asks for a reload, once each.
@@ -453,12 +458,12 @@ function ResultBody({
         ) : null}
         {result.error ? (
           <Field label={t.flow.error}>
-            <Notice tone="danger" text={mask(result.error, secrets)} />
+            <Notice tone="danger" text={t.diagnostic(mask(result.error, secrets))} />
           </Field>
         ) : null}
         <Field label={t.flow.output}>
           {output ? (
-            <CodeBlock text={mask(output, secrets)} />
+            <CodeBlock text={t.diagnostic(mask(output, secrets))} />
           ) : (
             <Text style={{ color: p.muted, fontSize: 13 }}>{t.flow.noOutput}</Text>
           )}
@@ -514,6 +519,7 @@ function ResultBody({
  * refetched right before and skipped unless it is still idle.
  */
 function ReloadIdle({ provider, hostId, label }: { provider: string; hostId: string; label: string | null }) {
+  const t = useToolboxText();
   const { p } = useLook();
   const paseo = usePaseo();
   const toast = useToast();
@@ -549,9 +555,9 @@ function ReloadIdle({ provider, hostId, label }: { provider: string; hostId: str
       toast.show(t.flow.reloaded(done), { variant: "success" });
       if (skipped > 0) toast.show(t.flow.reloadSkipped(skipped), { variant: "warning" });
     })()
-      .catch((error: unknown) => toast.error(`${t.flow.reloadFailed}: ${errorText(error)}`))
+      .catch((error: unknown) => toast.error(`${t.flow.reloadFailed}: ${t.diagnostic(errorText(error))}`))
       .finally(() => setPending(false));
-  }, [idle, paseo, pending, toast]);
+  }, [idle, paseo, pending, t, toast]);
 
   return (
     <View style={{ gap: 8 }}>
@@ -585,7 +591,12 @@ function Footer({ children }: { children: ReactNode }) {
 }
 
 /** argv as a shell-like line; a file-edit action (`["write-file", path]`) as a sentence. */
-function CommandView({ command, secrets }: { command: readonly string[]; secrets: readonly string[] }) {
+function CommandView({ command, relativeHome, secrets }: {
+  command: readonly string[];
+  relativeHome?: string;
+  secrets: readonly string[];
+}) {
+  const t = useToolboxText();
   const { p } = useLook();
   if (command[0] === "write-file" && command.length === 2) {
     return (
@@ -594,11 +605,17 @@ function CommandView({ command, secrets }: { command: readonly string[]; secrets
       </Text>
     );
   }
-  return <CodeBlock text={mask(formatArgv(command), secrets)} />;
+  return <CodeBlock text={mask(formatArgv(command, relativeHome), secrets)} wrap />;
 }
 
-export function formatArgv(argv: readonly string[]): string {
-  return argv.map((arg) => (arg === "" || /[\s"'$`\\|&;<>(){}*?!#~]/.test(arg) ? `'${arg.replace(/'/g, `'\\''`)}'` : arg)).join(" ");
+export function formatArgv(argv: readonly string[], relativeHome?: string): string {
+  const quote = (arg: string) => (arg === "" || /[\s"'$`\\|&;<>(){}*?!#~]/.test(arg) ? `'${arg.replace(/'/g, `'\\''`)}'` : arg);
+  return argv.map((arg, i) => {
+    if (relativeHome !== undefined && i === argv.length - 1 && argv[i - 1] === "--home") {
+      return relativeHome ? `~/${quote(relativeHome)}` : "~";
+    }
+    return quote(arg);
+  }).join(" ");
 }
 
 function mask(text: string, secrets: readonly string[]): string {

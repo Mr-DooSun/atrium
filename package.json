@@ -1,9 +1,20 @@
 {
-  "name": "paseo-nested-agents",
+  "name": "atrium",
+  "version": "0.1.0",
   "private": true,
-  "version": "0.0.0",
+  "description": "Paseo plugin: nested agent tree sidebar, usage and token monitor for additional Claude and Codex accounts, and an MCP and plugin toolbox.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mr-DooSun/atrium.git"
+  },
+  "homepage": "https://github.com/Mr-DooSun/atrium#readme",
+  "bugs": {
+    "url": "https://github.com/Mr-DooSun/atrium/issues"
+  },
   "files": [
     "paseo-plugin.json",
+    "README.md",
     "OVERVIEW.md",
     "OVERVIEW.*.md",
     "index.client.ts",
@@ -12,11 +23,13 @@
     "index.server.tsx",
     "client/",
     "server/",
-    "shared/"
+    "shared/",
+    "assets/"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.16.1",

@@ -155,9 +155,11 @@ test("429 reports Retry-After through onThrottle", async () => {
   const seen: (number | undefined)[] = [];
   const { opts } = setup({ status: 429, headers: { "retry-after": "120" } });
   await fetchClaudeRateLimits(account, opts, (t) => seen.push(t));
-  assert.deepEqual(seen, [NOW + 120_000]);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0], NOW + 120_000);
   const { opts: o2 } = setup({ status: 429 });
   await fetchClaudeRateLimits(account, o2, (t) => seen.push(t));
+  assert.equal(seen.length, 2);
   assert.equal(seen[1], undefined);
 });
 

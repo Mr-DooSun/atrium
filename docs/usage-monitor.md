@@ -1,6 +1,6 @@
 # Multi-account Claude and Codex usage monitor
 
-Complements Paseo's built-in usage indicator (bottom-left), which shows only the default account. This plugin detects every Claude and Codex account on the host and displays their rate limits, local token usage, and account identity.
+Complements Paseo's built-in usage indicator (bottom-left), which shows only the default account. Atrium adds a card for every other Claude and Codex account configured as a Paseo provider, with its rate limits, local token usage, and account identity.
 
 ## How accounts are detected
 
@@ -41,8 +41,8 @@ Rate limit windows include:
   - `ok`: Rate limits available
   - `expired`: OAuth token expired
   - `unauthenticated`: No login found
-  - `unavailable`: Credentials could not be read, Anthropic throttled the request, or OS error
-  - `error`: Malformed credentials or API error
+  - `unavailable`: The login uses another authentication source, or Anthropic returned no usage windows
+  - `error`: Credentials could not be read or are malformed, the request was throttled, or the API failed
 
 ### Claude: Local token totals
 
@@ -90,14 +90,12 @@ Rate-limit state meanings and actions:
 | `ok` | Rate limits retrieved | Display usage percentage |
 | `expired` | OAuth token expired | Re-login with this account's `claude` command |
 | `unauthenticated` | No Claude OAuth login found | Log in via `claude` |
-| `unavailable` | Credentials could not be read; Anthropic throttled; or OS error | Retry; check system keychain or `.credentials.json` |
-| `error` | Credentials malformed or API returned an error | Show the error message; retry |
+| `unavailable` | The profile authenticates through an API key, custom base URL, Bedrock, Vertex or Foundry, or Anthropic returned no usage windows | None; limits are not available for this login |
+| `error` | Credentials could not be read or are malformed, Anthropic throttled the request, or the request failed | Shows the error message; retried on the next refresh (after `Retry-After` when throttled) |
 
 ## Where it shows up
 
-The plugin registers two usage sources ("claude-profiles" and "codex-profiles") that add account cards to Paseo's built-in usage panel. Only accounts not already shown by Paseo (i.e., not the default `~/.claude`/`~/.codex` or the daemon's `CLAUDE_CONFIG_DIR`/`CODEX_HOME`) are displayed. Each card shows the plan, 5-hour/weekly/model-scoped rate-limit windows with utilization %, reset times, email (if available), and local token totals for 5-hour, today, and 7-day windows (including reasoning tokens for Codex). For Codex accounts, the rate-limit snapshot timestamp is shown. Cards from expired or rejected accounts carry a `refreshedBy` hint so Paseo shows its own re-login prompt.
-
-Paseo caches usage data for approximately 5 minutes.
+The plugin registers two usage sources ("claude-profiles" and "codex-profiles") that add account cards to Paseo's built-in usage panel. Only accounts not already shown by Paseo (i.e., not the default `~/.claude`/`~/.codex` or the daemon's `CLAUDE_CONFIG_DIR`/`CODEX_HOME`) are displayed. Each card shows the plan, 5-hour/weekly/model-scoped rate-limit windows with utilization %, reset times, email (if available), and local token totals for 5-hour, today, and 7-day windows. For Codex accounts, the rate-limit snapshot timestamp is shown. Cards for expired or rejected Claude logins carry a `refreshedBy` hint so Paseo shows its own re-login prompt.
 
 ## Privacy
 
@@ -105,12 +103,4 @@ Paseo caches usage data for approximately 5 minutes.
 
 **Codex accounts**: Rate limits and tokens are read from local session logs only; no network requests are made. The `id_token` JWT is decoded locally to extract email and plan; tokens are never returned or logged.
 
-All local token logs are read from the host filesystem only; they are aggregated in memory and never sent anywhere.
-
-## Replacing zerosub
-
-zerosub's exact feature set has not been verified against this plugin. This monitor detects every Claude and Codex account on the host and displays their rate limits, local usage, and account identity. To migrate:
-
-1. Enable this monitor in Paseo plugin settings
-2. Verify all accounts appear and their data looks correct
-3. Disable or uninstall zerosub
+All local token logs are read from the host filesystem only; they are aggregated in memory and never sent anywhere. The plugin sends no telemetry.

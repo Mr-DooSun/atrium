@@ -107,6 +107,7 @@ if (args[0] === "login") {
   const blocked = await codexAdapter.addMcp(profile, dir, {
     ...input, transport: "http", target: "https://example.com/mcp", args: [], env: {},
   });
+  assert.ok(blocked.error);
   assert.match(blocked.error, /Run the displayed command in a terminal/);
   assert.equal(blocked.needsReload, false);
   assert.equal((await codexAdapter.previewMcpAdd(profile, dir, { ...input, transport: "sse" })).supported, false);

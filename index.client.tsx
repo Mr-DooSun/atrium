@@ -4,8 +4,8 @@ import { registerToolbox } from "./client/toolbox";
 
 export default function contribute(client: PluginClientContext) {
   const removeSidebar = client.addSidebarView({
-    id: "nested-agents",
-    title: "Nested agents",
+    id: "atrium",
+    title: "Atrium",
     description: "Workspaces and agents as a tree, sub-agent worktrees under their parent",
     Component: NestedSidebar,
   });

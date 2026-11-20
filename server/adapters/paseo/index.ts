@@ -1,8 +1,11 @@
+import { homedir } from "node:os";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import type { ActionPreview, InstalledPlugin, PluginAction } from "../../../shared/toolbox/types.ts";
+import { PASEO_PLUGIN_TRUST_WARNING } from "../../../shared/toolbox/warnings.ts";
 import { commandResult, unsupported, type PluginEcosystemAdapter } from "../../core/adapter.ts";
 import { failure, plain, run } from "../../core/exec.ts";
-import { resolvePaseoCommand } from "../../core/paseo-bin.ts";
+import { paseoHomeArgs, resolvePaseoCommand } from "../../core/paseo-bin.ts";
 
 const registryUrl = new URL("https://plugins.paseo.sh");
 const registryIndex = new URL("/index.json", registryUrl).href;
@@ -89,8 +92,8 @@ function redact(text: string): string {
     .replace(/(https?:\/\/[^\s?"']+)\?[^\s"']+/gi, "$1?<redacted>");
 }
 
-async function installedFromCli(command: string): Promise<InstalledEntry[]> {
-  const result = await run(command, ["plugin", "ls", "--json"]);
+async function installedFromCli(command: string, home: readonly string[]): Promise<InstalledEntry[]> {
+  const result = await run(command, ["plugin", "ls", "--json", ...home]);
   const error = failure(result);
   if (error) throw new Error(redact(error));
   try {
@@ -178,11 +181,18 @@ type PinnedPlan = {
 
 const pinnedPlans = new Map<string, PinnedPlan>();
 const pendingPlans = new Map<string, Promise<PinnedPlan>>();
-const trustWarning = "Paseo plugins run unsandboxed on this machine with the daemon user's access.";
 const registryUpdateWarning = "This Paseo CLI requires interactive review for registry installations. Run the displayed command in a terminal and confirm the revision shown there.";
 
-function planKey(action: PluginAction, id: string, marketplace: string | null, cwd?: string | null) {
-  return JSON.stringify([action, id, marketplace, cwd ?? null]);
+function planKey(action: PluginAction, id: string, marketplace: string | null, home: readonly string[], cwd?: string | null) {
+  return JSON.stringify([action, id, marketplace, home, cwd ?? null]);
+}
+
+function relativeHomeForDisplay(home: readonly string[]): string | undefined {
+  const path = home[1];
+  if (!path || !isAbsolute(path)) return undefined;
+  const suffix = relative(resolve(homedir()), resolve(path));
+  if (isAbsolute(suffix) || suffix === ".." || suffix.startsWith(`..${sep}`)) return undefined;
+  return suffix.split(sep).join("/");
 }
 
 function pinnedInstall(entry: RegistryEntry) {
@@ -212,7 +222,7 @@ function installedSnapshot(entry: InstalledEntry) {
   return JSON.stringify([entry.installation, entry.remote, entry.path, entry.version]);
 }
 
-async function resolvePinnedPlan(action: "install" | "update", id: string, marketplace: string | null): Promise<PinnedPlan> {
+async function resolvePinnedPlan(action: "install" | "update", id: string, marketplace: string | null, home: readonly string[]): Promise<PinnedPlan> {
   const command = await resolvePaseoCommand();
   if (action === "install") {
     if (!registryId.test(id) || (marketplace !== null && marketplace !== registryName)) {
@@ -223,13 +233,13 @@ async function resolvePinnedPlan(action: "install" | "update", id: string, marke
     const args = entry && pinnedInstall(entry);
     const source = entry && catalogSource(entry);
     if (!args || !source) throw new Error("Paseo registry entry has no supported immutable install target.");
-    return { command, args, source, expiresAt: registryCache?.expiresAt ?? Date.now() };
+    return { command, args: [...args, ...home], source, expiresAt: registryCache?.expiresAt ?? Date.now() };
   }
 
   if (!runtimeId.test(id)) throw new Error("Choose an installed Paseo plugin.");
-  const installed = (await installedFromCli(command)).find((plugin) => plugin.id === id);
+  const installed = (await installedFromCli(command, home)).find((plugin) => plugin.id === id);
   if (!installed) throw new Error("Paseo plugin is no longer installed.");
-  const check = await run(command, ["plugin", "update", id, "--check", "--json"]);
+  const check = await run(command, ["plugin", "update", id, "--check", "--json", ...home]);
   const error = failure(check);
   if (error) throw new Error(redact(error));
   const row = parseUpdateResult(check.stdout, id);
@@ -244,10 +254,10 @@ async function resolvePinnedPlan(action: "install" | "update", id: string, marke
   const expiresAt = Date.now() + registryTtlMs;
   if (installed.installation?.identity.registry) {
     // Paseo rejects explicit selectors for registry-owned installations.
-    return { command, args: ["plugin", "update", id], source, expiresAt, manual: true };
+    return { command, args: ["plugin", "update", id, ...home], source, expiresAt, manual: true };
   }
   // The update resolver recognizes a full SHA directly before looking up remote refs.
-  const args = ["plugin", "update", id, target.kind === "git" ? "--ref" : "--version", revision, "--json"];
+  const args = ["plugin", "update", id, target.kind === "git" ? "--ref" : "--version", revision, "--json", ...home];
   return { command, args, source, installedSnapshot: installedSnapshot(installed), expiresAt };
 }
 
@@ -259,13 +269,13 @@ function activePinnedPlan(key: string) {
   return pinnedPlans.get(key);
 }
 
-async function previewPinnedPlan(action: "install" | "update", id: string, marketplace: string | null, cwd?: string | null) {
-  const key = planKey(action, id, marketplace, cwd);
+async function previewPinnedPlan(action: "install" | "update", id: string, marketplace: string | null, home: readonly string[], cwd?: string | null) {
+  const key = planKey(action, id, marketplace, home, cwd);
   const active = activePinnedPlan(key);
   if (active) return active;
   let pending = pendingPlans.get(key);
   if (!pending) {
-    pending = resolvePinnedPlan(action, id, marketplace).then((plan) => {
+    pending = resolvePinnedPlan(action, id, marketplace, home).then((plan) => {
       pinnedPlans.set(key, plan);
       return plan;
     }).finally(() => { pendingPlans.delete(key); });
@@ -287,14 +297,15 @@ function localizedText(entry: RegistryEntry) {
   };
 }
 
-let updateCache: { at: number; map: Map<string, string> } | null = null;
+let updateCache: { home: string | undefined; at: number; map: Map<string, string> } | null = null;
 const UPDATE_TTL_MS = 10 * 60_000;
 
 export const paseoPluginsAdapter: PluginEcosystemAdapter = {
   async checkUpdates() {
-    if (updateCache && Date.now() - updateCache.at < UPDATE_TTL_MS) return updateCache.map;
+    const home = paseoHomeArgs();
+    if (updateCache && updateCache.home === home[1] && Date.now() - updateCache.at < UPDATE_TTL_MS) return updateCache.map;
     const command = await resolvePaseoCommand();
-    const result = await run(command, ["plugin", "update", "--all", "--check", "--json"], { timeoutMs: 90_000 });
+    const result = await run(command, ["plugin", "update", "--all", "--check", "--json", ...home], { timeoutMs: 90_000 });
     if (failure(result)) return new Map();
     let rows: z.infer<typeof updateResult> = [];
     try {
@@ -307,12 +318,12 @@ export const paseoPluginsAdapter: PluginEcosystemAdapter = {
       if (row.outcome !== "update" || !row.target) continue;
       map.set(row.id, row.target.kind === "git" ? row.target.commit.slice(0, 7) : row.target.version);
     }
-    updateCache = { at: Date.now(), map };
+    updateCache = { home: home[1], at: Date.now(), map };
     return map;
   },
 
   async listInstalled(): Promise<InstalledPlugin[]> {
-    const entries = await installedFromCli(await resolvePaseoCommand());
+    const entries = await installedFromCli(await resolvePaseoCommand(), paseoHomeArgs());
     return entries.map((entry) => ({
       id: entry.id,
       name: entry.name ?? entry.id,
@@ -329,7 +340,7 @@ export const paseoPluginsAdapter: PluginEcosystemAdapter = {
   async listCatalog(_profile, query) {
     const [registry, installed] = await Promise.all([
       getRegistry(),
-      resolvePaseoCommand().then(installedFromCli),
+      resolvePaseoCommand().then((command) => installedFromCli(command, paseoHomeArgs())),
     ]);
     const search = query.trim().toLowerCase();
     const plugins = registry.flatMap((entry) => {
@@ -350,13 +361,16 @@ export const paseoPluginsAdapter: PluginEcosystemAdapter = {
   },
 
   async previewAction(_profile, action, pluginId, marketplace, cwd) {
+    const home = paseoHomeArgs();
+    const relativeHome = relativeHomeForDisplay(home);
     if (action === "install" || action === "update") {
       try {
-        const plan = await previewPinnedPlan(action, pluginId, marketplace, cwd);
+        const plan = await previewPinnedPlan(action, pluginId, marketplace, home, cwd);
         return {
           command: [plan.command, ...plan.args],
+          relativeHome,
           source: plan.source,
-          warnings: plan.manual ? [registryUpdateWarning, trustWarning] : [trustWarning],
+          warnings: plan.manual ? [registryUpdateWarning, PASEO_PLUGIN_TRUST_WARNING] : [PASEO_PLUGIN_TRUST_WARNING],
           supported: !plan.manual,
         };
       } catch (error) {
@@ -365,11 +379,12 @@ export const paseoPluginsAdapter: PluginEcosystemAdapter = {
     }
     if (!runtimeId.test(pluginId)) return unavailablePreview("Choose an installed Paseo plugin.");
     const command = await resolvePaseoCommand();
-    const installed = (await installedFromCli(command)).find(({ id }) => id === pluginId);
+    const installed = (await installedFromCli(command, home)).find(({ id }) => id === pluginId);
     return {
-      command: [command, "plugin", actionVerb[action], pluginId, "--json"],
+      command: [command, "plugin", actionVerb[action], pluginId, "--json", ...home],
+      relativeHome,
       source: installed ? installedSource(installed) : null,
-      warnings: [trustWarning],
+      warnings: [PASEO_PLUGIN_TRUST_WARNING],
       supported: true,
     };
   },
@@ -377,16 +392,18 @@ export const paseoPluginsAdapter: PluginEcosystemAdapter = {
   async runAction(_profile, action, pluginId, marketplace, cwd) {
     updateCache = null;
     if (action !== "install" && !runtimeId.test(pluginId)) return unsupported([], "This Paseo plugin target");
+    const home = paseoHomeArgs();
+    const key = planKey(action, pluginId, marketplace, home, cwd);
     const requiresPreview = action === "install" || action === "update";
-    const plan = requiresPreview ? activePinnedPlan(planKey(action, pluginId, marketplace, cwd)) : undefined;
+    const plan = requiresPreview ? activePinnedPlan(key) : undefined;
     if (requiresPreview && !plan) return commandResult([], "", "Open a new preview and confirm its pinned revision before proceeding.", false);
     const command = plan?.command ?? await resolvePaseoCommand();
-    const args = plan?.args ?? ["plugin", actionVerb[action], pluginId, "--json"];
+    const args = plan?.args ?? ["plugin", actionVerb[action], pluginId, "--json", ...home];
     if (plan?.manual) return commandResult([command, ...args], "", registryUpdateWarning, false);
     if (action === "update") {
-      const current = (await installedFromCli(command)).find(({ id }) => id === pluginId);
+      const current = (await installedFromCli(command, home)).find(({ id }) => id === pluginId);
       if (!current || installedSnapshot(current) !== plan?.installedSnapshot) {
-        pinnedPlans.delete(planKey(action, pluginId, marketplace, cwd));
+        pinnedPlans.delete(key);
         return commandResult([], "", "The installed plugin changed. Open a new update preview.", false);
       }
     }

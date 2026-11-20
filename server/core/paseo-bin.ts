@@ -6,3 +6,9 @@ export async function resolvePaseoCommand(): Promise<string> {
   const result = await run("which", ["paseo"], { timeoutMs: 3_000 });
   return (!failure(result) && result.stdout.trim()) || "/Applications/Paseo.app/Contents/Resources/bin/paseo";
 }
+
+/** Select the daemon that launched this plugin when Paseo supplies its home. */
+export function paseoHomeArgs(): string[] {
+  const home = process.env.PASEO_HOME;
+  return home ? ["--home", home] : [];
+}

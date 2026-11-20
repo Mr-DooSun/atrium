@@ -116,6 +116,8 @@ export type CommandResult = z.infer<typeof CommandResult>;
 /** What an action would do, shown in the confirmation modal before anything runs. */
 export const ActionPreview = z.object({
   command: z.array(z.string()),
+  /** Daemon-home path relative to the daemon user's home, for display only. */
+  relativeHome: z.string().optional(),
   /** What will be fetched and from where (repo, package, URL). */
   source: z.string().nullable(),
   warnings: z.array(z.string()),

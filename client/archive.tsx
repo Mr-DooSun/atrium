@@ -1,8 +1,9 @@
 import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { usePaseo, type AgentRef, type WorkspaceRef } from "@getpaseo/plugin/client";
+import { usePaseo, useTranslation, type AgentRef, type WorkspaceRef } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { TITLE_LINE, type Palette } from "./look";
+import { sidebarText } from "./sidebar-strings";
 
 /** Workspaces the archive leaves with no agent; archived right after it. */
 export interface EmptiedWorkspaces {
@@ -41,6 +42,7 @@ export interface ArchiveState {
 export function useArchive(target: ArchiveTarget | null): ArchiveState {
   const paseo = usePaseo();
   const toast = useToast();
+  const { t } = useTranslation(sidebarText);
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
 
@@ -63,17 +65,17 @@ export function useArchive(target: ArchiveTarget | null): ArchiveState {
         const result = await paseo.workspaces.ref(ref).archive().catch(() => ({ error: "failed" }));
         if (result.error) failed += 1;
       }
-      if (failed > 0) toast.error(`비게 된 워크스페이스 ${failed}개를 보관하지 못했습니다`);
+      if (failed > 0) toast.error(t("archiveEmptiedFailed", { n: failed }));
     };
     run()
       .catch((error: unknown) => {
-        toast.error(error instanceof Error ? error.message : "보관하지 못했습니다");
+        toast.error(error instanceof Error ? error.message : t("archiveFailed"));
       })
       .finally(() => {
         setPending(false);
         setConfirming(false);
       });
-  }, [paseo, target, pending, toast]);
+  }, [paseo, target, pending, toast, t]);
 
   return {
     confirming,
@@ -87,10 +89,11 @@ export function useArchive(target: ArchiveTarget | null): ArchiveState {
 /** Trailing button shown on hover in place of the status mark. */
 export function ArchiveButton({ onPress, p }: { onPress(): void; p: Palette }) {
   const [hovered, setHovered] = useState(false);
+  const { t } = useTranslation(sidebarText);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="보관"
+      accessibilityLabel={t("archive")}
       hitSlop={6}
       onPress={onPress}
       onPointerEnter={() => setHovered(true)}
@@ -109,46 +112,40 @@ export function ArchiveButton({ onPress, p }: { onPress(): void; p: Palette }) {
   );
 }
 
-/** What archiving this row also takes with it, in one line. */
-export function archiveWarning(target: ArchiveTarget, descendants: number): string {
-  const parts: string[] = [];
-  if (target.kind === "workspace" && target.worktree) {
-    parts.push(
-      // The host removes the worktree it archives. The diff count cannot tell committed from
-      // uncommitted work, so the warning names the loss without guessing which it is.
-      target.hasChanges
-        ? "worktree 폴더가 삭제됩니다 · 푸시하지 않은 변경은 되찾을 수 없습니다"
-        : "worktree 폴더가 삭제됩니다",
-    );
-  }
-  const { refs, worktrees } = target.emptied;
-  if (worktrees > 0) {
-    parts.push(`비게 되는 worktree ${worktrees}개의 폴더도 삭제됩니다 · 푸시하지 않은 변경은 되찾을 수 없습니다`);
-  }
-  if (descendants > 0) parts.push(`하위 ${descendants}개도 함께 보관됩니다`);
-  if (refs.length > 0) parts.push(`비게 되는 워크스페이스 ${refs.length}개도 함께 보관됩니다`);
-  return parts.length ? parts.join(" · ") : "목록에서 숨기고 보관함으로 옮깁니다";
-}
-
 /** Confirmation dialog. Rendered beside the row, not inside it, so presses in the dialog never
  *  reach the row's own press handler through the portal. */
 export function ArchiveModal({
   state,
   title,
-  warning,
   danger,
   p,
   labels,
+  ...content
 }: {
   state: ArchiveState;
   title: string;
-  warning: string;
   danger: boolean;
   p: Palette;
   /** Overrides for dialogs other than archive, such as removing a project. */
   labels?: { heading: string; icon: string; confirm: string; pending: string; cancel: string };
-}) {
-  const l = labels ?? { heading: "보관할까요?", icon: "Archive", confirm: "보관", pending: "보관 중…", cancel: "취소" };
+} & ({ warning: string } | { target: ArchiveTarget; descendants: number })) {
+  const { t } = useTranslation(sidebarText);
+  const l = labels ?? { heading: t("archiveTitle"), icon: "Archive", confirm: t("archive"), pending: t("archiving"), cancel: t("cancel") };
+  let warning: string;
+  if ("warning" in content) {
+    warning = content.warning;
+  } else {
+    const { target, descendants } = content;
+    const { refs, worktrees } = target.emptied;
+    const parts: string[] = [];
+    if (target.kind === "workspace" && target.worktree) {
+      parts.push(t(target.hasChanges ? "archiveWorktreeChanges" : "archiveWorktree"));
+    }
+    if (worktrees > 0) parts.push(t("archiveAdditionalWorktrees", { n: worktrees }));
+    if (descendants > 0) parts.push(t("archiveDescendants", { n: descendants }));
+    if (refs.length > 0) parts.push(t("archiveEmptied", { n: refs.length }));
+    warning = parts.length ? parts.join(" · ") : t("archiveMove");
+  }
   return (
     <Modal
       title={l.heading}

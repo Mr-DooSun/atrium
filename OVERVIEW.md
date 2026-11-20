@@ -1,13 +1,90 @@
-Replaces the sidebar list with a tree of workspaces and agents built from Paseo's parent agent records. A sub-agent that runs in its own worktree workspace is shown under the agent that started it, at any depth, instead of as a separate top-level row. Agents in the same workspace are nested under their parent agent. A workspace with a single root agent shows that agent's children directly under the workspace row.
+Atrium changes how you work across many agents in Paseo. It adds three things: a sidebar that shows workspaces and agents as a tree, usage cards for additional Claude and Codex accounts, and `/mcp` and `/plugins` screens for managing MCP servers and plugins in every configured agent CLI.
 
-Each workspace row keeps its status, branch and diff counts, and shows how many agents below it are running. A running workspace or agent has a spinning ring; agents waiting for permission are amber and failed ones red. Connector lines run from each project tile down to its sessions and from each agent to the agents it started. Each row leads with its provider's mark in brand color (the Claude Code bot, Codex, Antigravity; custom providers named after one, such as claude-pb1, use its mark) and ends with its status. rows fold and unfold, and a folded row shows how many entries it hides. Hovering a workspace row shows a pencil to give it a display name instead of its folder name; the name is the workspace's Paseo title, so other clients show it too, and an empty name goes back to the folder name.
+## Agent tree sidebar
 
-A project stays in the tree after its last session is archived, with a row to start a new chat in it. Hovering a project header shows a button to remove it from Paseo (a long press on mobile), the same as Paseo's own remove project: after a confirmation that counts its sessions and any still running, its sessions are archived and its files stay on disk. Adding the folder in Paseo again brings it back.
+Choose it under Settings, Sidebar, Sidebar view, "Atrium". It replaces the sidebar list with a tree built from Paseo's parent agent records. A sub-agent that runs in its own worktree workspace is shown under the agent that started it, at any depth, instead of as a separate top-level row. Agents in the same workspace are nested under their parent agent. A workspace with a single root agent shows that agent's children directly under the workspace row.
 
-Projects are listed most recent work first until you set your own order. On desktop, drag a project header up or down and drop it where a line shows; a click still folds it. Sessions drag the same way among the sessions beside them, at any depth, and carry the sessions under them; an item lands by its own row, so a long project is passed once the pointer passes its header, and holding the pointer near the top or bottom edge scrolls the list; new top sessions show first and new sub-sessions last. On mobile, a long press on a project header opens a menu with reordering and removing; reordering gives every header up and down buttons, and Done ends it. The order is kept on the daemon by folder, so every client shows it and a project added again keeps its place; a project not placed yet shows at the top, and Reset goes back to most recent first.
+Each workspace row keeps its status, branch and diff counts, and shows how many agents below it are running. A running workspace or agent has a spinning ring; agents waiting for permission are amber and failed ones red. Each row starts with its provider's mark (Claude Code, Codex, Antigravity; a custom provider that extends one uses its mark) and ends with its status. Rows fold and unfold, and a folded row shows how many entries it hides. Hovering a workspace row shows a pencil to give it a display name; the name is saved as the workspace's Paseo title, so other clients show it too, and an empty name goes back to the folder name.
 
-A General section stays pinned at the bottom of the sidebar, below the tree, for conversations that belong to no project. Paseo agents always run in a folder, so these run in `~/.paseo-chat` on the daemon, which the plugin creates on first use; that folder's workspaces are left out of the tree. Its labels follow the app language, in every language Paseo offers, and fall back to English for any other. The new chat button opens Paseo's own new workspace screen for that folder, so the provider picker works as usual. Chats are listed most recent first, and archiving a chat also archives its workspace when nothing else runs there.
+Projects:
 
-Choose it under Settings, Sidebar, Sidebar view. Background helpers and closed agents are hidden. Fold state is not saved across reloads.
+- A project stays in the tree after its last session is archived, with a row to start a new chat in it.
+- Hovering a project header shows a button to remove it from Paseo (a long press on mobile). After a confirmation that counts its sessions and any still running, its sessions are archived and its files stay on disk. Adding the folder in Paseo again brings it back.
+- Archiving a session also archives its workspace when nothing else runs there.
 
-The plugin extends Paseo's built-in usage panel with account cards for non-default Claude and Codex accounts on the host. Each card shows plan, rate-limit windows, reset times, email, and local token totals for 5-hour/today/7-day periods. Cards for expired or rejected logins carry a `refreshedBy` hint so Paseo shows its re-login prompt. For Claude accounts, rate limits are fetched from Anthropic's OAuth API; for Codex, they come from local session logs only. It replaces zerosub. For details, see [docs/usage-monitor.md](docs/usage-monitor.md).
+Ordering:
+
+- Projects are listed most recent work first until you set your own order.
+- On desktop, drag a project header and drop it where a line shows; a click still folds it. Sessions drag the same way among the sessions beside them, at any depth, and carry the sessions under them. Holding the pointer near the top or bottom edge scrolls the list.
+- On mobile, a long press on a project header opens a menu with reordering and removing. Reordering gives every header up and down buttons, and Done ends it.
+- The order is kept on the daemon by folder, so every client shows it and a project added again keeps its place. A project not placed yet shows at the top, and Reset goes back to most recent first. New top sessions show first and new sub-sessions last.
+
+A General section stays pinned at the bottom of the sidebar for conversations that belong to no project. Paseo agents always run in a folder, so these run in `~/.paseo-chat` on the daemon, which the plugin creates on first use; that folder's workspaces are left out of the tree. The new chat button opens Paseo's own new workspace screen for that folder, so the provider picker works as usual.
+
+Background helpers and closed agents are hidden. Fold state is not saved across reloads. Sidebar labels are available in English, Korean, Japanese, Simplified Chinese, Spanish, French, Portuguese (Brazil), Russian and Arabic, following the app language, and fall back to English.
+
+## Usage for additional accounts
+
+Paseo's built-in usage panel shows the default Claude and Codex accounts. Atrium adds a card for each other Claude or Codex account that is configured as a Paseo provider, such as a custom provider that extends `claude` with its own `CLAUDE_CONFIG_DIR`. Providers that share a config directory share one card. Accounts that Paseo already shows (`~/.claude`, `~/.codex`, or the daemon's own `CLAUDE_CONFIG_DIR` or `CODEX_HOME`) are not repeated.
+
+Each card shows the plan, the 5-hour, weekly and model-specific limit windows with reset times, the account email when it is known, and local token totals for the current 5-hour window, today and the last 7 days.
+
+- Claude limits come from Anthropic's usage endpoint for that account and are refreshed at most once a minute per account. A profile that authenticates through an API key, a custom base URL, Bedrock, Vertex or Foundry shows no limits.
+- Codex limits come from the newest snapshot in the account's local session logs, with the time it was recorded. They can be out of date, and a window whose reset time has passed shows 0%.
+- An expired or rejected Claude login shows Paseo's own re-login prompt on its card.
+
+More detail is in [the usage monitor notes](https://github.com/Mr-DooSun/atrium/blob/main/docs/usage-monitor.md).
+
+## MCP and plugin toolbox
+
+In an agent chat, `/mcp` and `/plugins` (or `/plugin`) open full screens, and the Command Center has matching items. These commands take the place of the providers' own `/mcp` and `/plugin` commands inside Paseo.
+
+- `/mcp` lists the MCP servers of a profile with their scope and status, and adds, removes or signs in to servers. `/mcp <profile>` opens another profile than the chat's own.
+- `/plugins` has tabs for Paseo, Claude, Codex and Antigravity. It lists installed plugins and marketplace catalogs, and installs, removes, enables, disables and updates plugins. `/plugins claude` opens a tab directly.
+- Every profile works separately. A custom provider such as `claude-work` with its own config directory is its own profile, so each account has its own servers and plugins. When a tab has several profiles, you can run one change on several of them at once.
+- Every change shows a confirmation first, listing the exact command for each profile, its source, and any warnings. Nothing changes until you confirm.
+
+Support differs by CLI:
+
+| | MCP servers | Plugins |
+| --- | --- | --- |
+| Claude Code | List, add, remove | Catalog, install, remove, enable, disable, update; add, remove and update marketplaces |
+| Codex | List, add, remove (user scope); shows the sign-in command to run in a terminal | Catalog, install, remove; add, remove and update marketplaces |
+| Antigravity | List, add, remove by editing its documented `mcp_config.json` | Installed plugins, install, remove, enable, disable; browsing happens in Antigravity itself |
+| Paseo | — | Registry catalog, installed plugins, install, remove, enable, disable, update |
+
+The toolbox screens use the same nine languages as the sidebar, following the app language.
+
+## Setup
+
+Requires Paseo 0.16.1 or later. Dragging to reorder is desktop only; mobile uses the long-press menu. The toolbox uses the agent CLIs installed on the daemon host (`claude`, `codex`, `agy`) and the `paseo` CLI; a CLI that is not installed shows as not installed. Usage cards need nothing beyond an account that is configured as a Paseo provider and logged in.
+
+## Data access
+
+Atrium runs on the daemon host with your user's permissions. It sends nothing to its author and collects no telemetry.
+
+Network requests made by the plugin itself:
+
+- For each additional Claude account, the account's OAuth access token is sent to `https://api.anthropic.com/api/oauth/usage` to read its limits. Redirects are refused, and the token is not logged, stored or returned to the app.
+- The Paseo plugins tab downloads the public catalog from `https://plugins.paseo.sh/index.json`.
+
+Commands it runs on the daemon host (as separate processes, without a shell):
+
+- Each profile's own CLI with that profile's environment: `claude` (`auth status`, `mcp`, `plugin` and `plugin marketplace` commands), `codex` (`login status`, `mcp`, `plugin` and `plugin marketplace` commands) and `agy` (`--version`, `plugin` commands). Listing commands run when a screen opens; changes run only after you confirm. These CLIs may contact their own services, for example to check MCP servers or download plugins.
+- The `paseo` CLI to list projects, remove a project, and list, install, update, enable, disable and remove Paseo plugins.
+- On macOS, `/usr/bin/security find-generic-password` to read an additional Claude account's login from the Keychain.
+
+Files it reads:
+
+- `~/.paseo/config.json` (or `$PASEO_HOME/config.json`) to find the configured providers.
+- For each additional Claude account: `.claude.json` in its config directory (email, organization, plan), session logs under `projects/` (token counts only), and, outside macOS, `.credentials.json` for the login.
+- For each additional Codex account: `auth.json` (email and plan, decoded on the host) and session logs under `sessions/` (token counts and limit snapshots).
+- For the toolbox: Claude's `.claude.json`, `.mcp.json` in the chat's folder and the plugin marketplace files in the Claude config directory (names only); `.codex/config.toml` in the chat's folder (names only); Antigravity's `settings.json` and `mcp_config.json` files.
+
+Files it writes:
+
+- `~/.paseo/atrium/project-order.json` (or under `$PASEO_HOME`) for the project and session order. If that file does not exist yet, an order saved by an earlier version in `nested-agents/project-order.json` in the same folder is copied there once; the old file is read but left in place.
+- The `~/.paseo-chat` folder for General chats.
+- Antigravity's `~/.gemini/config/mcp_config.json` or `<project>/.agents/mcp_config.json`, only when you add or remove an Antigravity MCP server.
+
+Account emails appear on usage cards and in the toolbox's profile status. MCP environment values and headers are not sent to the app, and the toolbox masks tokens and other secrets it finds in command output.
