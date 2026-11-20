@@ -8,10 +8,10 @@ Each workspace row keeps its status, branch and diff counts, and shows how many 
 
 Worktrees:
 
-- Session rows show which git worktree and branch the session works in, so when you split work across several `git worktree` checkouts you can tell at a glance which session runs where.
-- A session in a linked worktree shows a folder icon, its branch and the worktree's folder name, with a thin bar in the worktree's color on the row's left edge. Every session in the same worktree gets the same color wherever it sits in the tree; the order does not change.
-- A session in the project's main checkout shows no badge while it is on the default branch (the remote's `origin/HEAD`, otherwise a local `main`, then `master`), or when no default branch can be found. On any other branch it shows only the branch, in muted gray. A detached HEAD shows the short commit hash with "(detached)", in a linked worktree or the main checkout.
-- The tooltip and accessibility label give the full worktree path. Branches are checked again every 20 seconds, so a session that switches branch updates on its own. A folder outside git, a missing folder, or a host without `git` shows no badge.
+- Session rows, and workspace rows that hold a single agent, show which git worktree and branch the session works in, so when you split work across several `git worktree` checkouts you can tell at a glance which session runs where. Where a badge shows, it takes the place of Paseo's gray branch line.
+- A session in a linked worktree shows a folder icon, its branch and the worktree's folder name, with a thin bar in the worktree's color on the row's left edge. Every row in the same worktree gets the same color and look, whatever kind of row it is and wherever it sits in the tree; the order does not change. A long branch name is cut short, while the folder name keeps its width up to a limit.
+- A session in the project's main checkout shows no badge while it is on the default branch (the remote's `origin/HEAD`, otherwise a local `main`, then `master`), or when no default branch can be found. On any other branch it shows only the branch, in muted gray. A detached HEAD shows the short commit hash followed by "detached", in a linked worktree or the main checkout; the hash always stays visible, and in a narrow sidebar the word "detached" is cut short first.
+- The full worktree path is in the accessibility label read by screen readers; there is no hover tooltip. Branches are checked again every 20 seconds, so a session that switches branch updates on its own. A folder outside git, a missing folder, or a host without `git` shows no badge.
 
 Projects:
 

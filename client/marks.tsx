@@ -121,25 +121,41 @@ export function WorktreeBadge({ info, spec, p }: { info: GitWorktree; spec: Work
   const color = linked ? worktreeColor(p, info.worktreePath) : p.muted;
   const branch = spec.detached ? t("worktreeDetached", { head: spec.label }) : spec.label;
   const label = spec.folder ? t("worktreeLinked", { folder: spec.folder, branch }) : t("worktreeMain", { branch });
-  const tooltip = `${label}\n${t("worktreePath", { path: info.worktreePath })}`;
+  // react-native-web drops `title` and the plugin SDK has no tooltip, so the full path is only
+  // in the accessibility label.
+  const full = `${label}. ${t("worktreePath", { path: info.worktreePath })}`;
   return (
     <View
       accessible
-      accessibilityLabel={label}
-      // title is the web tooltip; React Native's types leave it out and native has no use for it.
-      {...(Platform.OS === "web" ? ({ title: tooltip } as object) : null)}
-      style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 }}
+      accessibilityLabel={full}
+      // Never wider than the row: the branch (or the word "detached") gives way first, then the chip.
+      style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0, maxWidth: "100%", overflow: "hidden" }}
     >
-      <Icon name={linked ? "FolderGit2" : "GitBranch"} size={12} color={color} />
-      <Text numberOfLines={1} style={{ flexShrink: 1, minWidth: 0, color, fontSize: 12, opacity: linked ? 1 : 0.8 }}>
-        {branch}
-      </Text>
+      <View style={{ flexShrink: 0 }}>
+        <Icon name={linked ? "FolderGit2" : "GitBranch"} size={12} color={color} />
+      </View>
+      {spec.detached ? (
+        // The hash tells detached rows apart, so it never shrinks; the word before it may be cut.
+        <>
+          <Text numberOfLines={1} style={{ flexShrink: 0, color, fontSize: 12, opacity: linked ? 1 : 0.8 }}>
+            {spec.label}
+          </Text>
+          <Text numberOfLines={1} style={{ flexShrink: 4, minWidth: 0, color, fontSize: 12, opacity: 0.7 }}>
+            {t("worktreeDetached", { head: "" }).trim()}
+          </Text>
+        </>
+      ) : (
+        <Text numberOfLines={1} style={{ flexShrink: 4, minWidth: 0, color, fontSize: 12, opacity: linked ? 1 : 0.8 }}>
+          {spec.label}
+        </Text>
+      )}
       {spec.folder ? (
         <Text
           numberOfLines={1}
           style={{
-            flexShrink: 2,
-            minWidth: 0,
+            flexShrink: 1,
+            minWidth: 24,
+            maxWidth: 112,
             color,
             fontSize: 11,
             paddingHorizontal: 5,

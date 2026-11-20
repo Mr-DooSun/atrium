@@ -4,14 +4,12 @@ A Paseo plugin for working with many agents at once: an agent tree sidebar, usag
 
 ![Atrium agent tree sidebar](assets/screenshot-sidebar.png)
 
-<!-- TODO: capture the sidebar with worktree badges (sessions in two or more linked worktrees plus one session in the main checkout on a branch other than the default branch), save it as assets/screenshot-worktrees.png, then uncomment the line below and add the file to "media" in paseo-plugin.json.
 ![Worktree badges in the Atrium sidebar](assets/screenshot-worktrees.png)
--->
 
 ## Features
 
 - **Agent tree sidebar.** Workspaces and agents as a tree built from Paseo's parent agent records; sub-agents in their own worktrees show under the agent that started them. Drag projects and sessions to reorder them (long-press menu on mobile), rename workspaces, archive sessions, remove projects, and keep project-less chats in a pinned General section.
-- **Worktree badges.** A session in a linked git worktree shows its branch, the worktree's folder name and a colored bar, one color per worktree; a session in the main checkout shows its branch only when it is off the default branch. When you split work across several `git worktree` checkouts you can see at a glance which session runs where.
+- **Worktree badges.** On session rows and single-agent workspace rows, a session in a linked git worktree shows its branch, the worktree's folder name and a colored bar, one color per worktree; a session in the main checkout shows its branch only when it is off the default branch. When you split work across several `git worktree` checkouts you can see at a glance which session runs where.
 - **Usage for additional accounts.** Cards in Paseo's usage panel for each extra Claude or Codex account configured as a Paseo provider: plan, 5-hour, weekly and model-specific limits with reset times, and local token totals.
 - **MCP and plugin toolbox.** `/mcp`, `/plugins` (or `/plugin`) and Command Center items open screens to list, add and remove MCP servers and to browse, install, remove, enable, disable and update plugins for Claude Code, Codex, Antigravity and Paseo, per profile (account). Every change shows the exact command and asks for confirmation first.
 

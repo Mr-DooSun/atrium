@@ -147,7 +147,12 @@ function useWorktrees(): ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git"
   // Agents grouped by the folder they work in: one entry per distinct cwd.
   const byCwd = useAgents({ where: visibleAgent, groupBy: (a) => a.cwd });
   // Sorted and distinct, so the key only changes when the set of folders does, not their order.
-  const cwds = useMemo(() => [...new Set(byCwd.map((g) => g.key).filter((c) => c.length > 0))].sort(), [byCwd]);
+  // A workspace's own folder is asked about too: a workspace with one agent is drawn as one row.
+  const byDirectory = useWorkspaces({ where: visibleWorkspace, groupBy: (w) => w.directory });
+  const cwds = useMemo(
+    () => [...new Set([...byCwd, ...byDirectory].map((g) => g.key).filter((c) => c.length > 0))].sort(),
+    [byCwd, byDirectory],
+  );
   const cwdsKey = cwds.join("\n");
   const query = useQuery({
     queryKey: ["atrium", "worktrees", cwdsKey],
@@ -1076,6 +1081,7 @@ function WorkspaceRow({
     title: w.title,
     folder: w.name,
     branch: w.branch,
+    directory: w.directory,
     indicator: w.indicator,
     kind: w.kind,
     additions: w.diffStat?.additions ?? null,
@@ -1155,7 +1161,10 @@ function WorkspaceRow({
   const renameModal = <RenameModal state={rename} folder={ws.folder} p={p} />;
   // A branch only says something when the row works in its own worktree; rows on the project's
   // checkout would all repeat the same branch.
-  const branch = ws.kind === "worktree" ? ws.branch : null;
+  const worktree = ctx.worktrees.get(ws.directory) ?? null;
+  const badge = worktreeBadge(worktree);
+  // Our badge says it better; Paseo's own branch is the fallback when there is no answer.
+  const branch = !worktree && ws.kind === "worktree" ? ws.branch : null;
   const meta: ReactNode[] = [];
   if (running > 0) meta.push(<Text key="run" style={{ color: p.running }}>{t("runningBelow", { n: running })}</Text>);
   if (hidden > 0) meta.push(<Text key="hid">{t("collapsedBelow", { n: hidden })}</Text>);
@@ -1181,6 +1190,7 @@ function WorkspaceRow({
     >
       {(hovered) => (
         <>
+          {worktree && badge?.tone === "linked" ? <WorktreeBar info={worktree} p={p} /> : null}
           <Leading
             node={node}
             mark={
@@ -1217,9 +1227,14 @@ function WorkspaceRow({
               )}
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
+            {worktree && badge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
             {branch || meta.length > 0 ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                {branch ? <Icon name="GitBranch" size={12} color={p.muted} /> : null}
+                {branch ? (
+                  <View style={{ flexShrink: 0 }}>
+                    <Icon name="GitBranch" size={12} color={p.muted} />
+                  </View>
+                ) : null}
                 <Text numberOfLines={1} style={{ flexShrink: 1, color: p.muted, fontSize: 12 }}>
                   {branch ?? ""}
                   {meta.map((part, i) => (
