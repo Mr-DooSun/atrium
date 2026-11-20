@@ -1,6 +1,6 @@
 {
   "name": "atrium",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Paseo plugin: nested agent tree sidebar, usage and token monitor for additional Claude and Codex accounts, and an MCP and plugin toolbox.",
   "license": "MIT",

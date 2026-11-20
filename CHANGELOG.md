@@ -7,6 +7,8 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-21
+
 ### Added
 
 - Plugin icon (`assets/icon.png`) and a store banner (`assets/hero-dark-1600.jpg`). The manifest now sets `icon` and puts the banner first in `media`.
@@ -29,7 +31,7 @@ features or behavior changes go in a minor release (0.2.0).
 
 ### Fixed
 
-- Panes screen text was only translated into English, Korean and part of Japanese. It is now available in all 11 languages the sidebar supports.
+- Panes screen text was only translated into English, Korean and part of Japanese. It is now available in all nine languages the sidebar supports.
 - Pane rows no longer show English text made on the server: tool calls show the tool name once with a translated status, and context compaction, plugin and unknown rows are translated in the app. Raw error messages are logged instead of shown.
 - Separate assistant replies loaded from history were joined into one paragraph. Only live streaming pieces of the same reply are joined now.
 - After a reconnect, retrying a pane keeps the history already loaded, clears the old error, and ignores late events from the previous subscription. While the server is reconnecting by itself, a pane that already shows messages says so instead of offering a retry button.
@@ -87,7 +89,8 @@ First public release.
 - The toolbox confirmation shows the full command and no longer repeats warnings.
 - Calls to the Paseo CLI pass `--home` explicitly, and displayed paths are shortened to `~` only inside the home folder.
 
-[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.1.0
