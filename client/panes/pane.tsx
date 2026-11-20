@@ -164,6 +164,23 @@ export const Pane = memo(function Pane({
   );
 });
 
+/**
+ * Web only: a handle must never start or carry a text selection. Pressing on selected text makes
+ * the browser start a native drag, and react-native-web ends the responder on `dragstart` no
+ * matter what onPanResponderTerminationRequest says, so the gesture would be dropped silently.
+ */
+export const NO_TEXT_SELECT: object = Platform.OS === "web" ? { userSelect: "none" } : {};
+
+/** Web only: drops any text selection left on the page (see NO_TEXT_SELECT). */
+function clearTextSelection(): void {
+  if (Platform.OS !== "web") return;
+  try {
+    (globalThis as { getSelection?(): { removeAllRanges(): void } | null }).getSelection?.()?.removeAllRanges();
+  } catch {
+    // No selection API here: nothing to clear.
+  }
+}
+
 function pageXOf(e: GestureResponderEvent): number {
   return e.nativeEvent.pageX;
 }
@@ -181,6 +198,7 @@ function DragGrip({ agent, handlers, label, p }: { agent: AgentRef; handlers: Pa
         onStartShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (e) => {
+          clearTextSelection();
           lastX.current = pageXOf(e);
           latest.current.handlers.onStart(latest.current.agent, lastX.current);
         },
@@ -201,7 +219,7 @@ function DragGrip({ agent, handlers, label, p }: { agent: AgentRef; handlers: Pa
       accessibilityLabel={label}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
-      style={{ width: 14, height: TITLE_LINE, marginLeft: -4, alignItems: "center", justifyContent: "center", borderRadius: 4, backgroundColor: hovered ? p.hover : "transparent", cursor: "grab" } as object}
+      style={{ width: 14, height: TITLE_LINE, marginLeft: -4, alignItems: "center", justifyContent: "center", borderRadius: 4, backgroundColor: hovered ? p.hover : "transparent", cursor: "grab", ...NO_TEXT_SELECT } as object}
     >
       <Icon name="GripVertical" size={13} color={p.muted} />
     </View>
@@ -239,6 +257,7 @@ function ResizeHandle({
         onStartShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
+          clearTextSelection();
           start.current = latest.current.width;
           setActive(true);
         },
@@ -282,6 +301,7 @@ function ResizeHandle({
         alignItems: "center",
         justifyContent: "center",
         cursor: "col-resize",
+        ...NO_TEXT_SELECT,
       } as object}
     >
       <View style={{ width: lit ? 3 : 1, height: lit ? "100%" : 32, borderRadius: 2, backgroundColor: lit ? p.running : p.guide }} />

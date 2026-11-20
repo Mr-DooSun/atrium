@@ -7,6 +7,17 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+### Fixed
+
+- Panes screen text was only translated into English, Korean and part of Japanese. It is now available in all 11 languages the sidebar supports.
+- Pane rows no longer show English text made on the server: tool calls show the tool name once with a translated status, and context compaction, plugin and unknown rows are translated in the app. Raw error messages are logged instead of shown.
+- Separate assistant replies loaded from history were joined into one paragraph. Only live streaming pieces of the same reply are joined now.
+- After a reconnect, retrying a pane keeps the history already loaded, clears the old error, and ignores late events from the previous subscription. While the server is reconnecting by itself, a pane that already shows messages says so instead of offering a retry button.
+- Reordering or resizing a pane in the web app was silently cancelled when text was selected on the page.
+- A closed pane's width came back when the same session was reopened before a restart. Sessions whose parent links form a loop could disappear from the panes screen.
+- Worktree badges disappeared with git older than 2.36.
+- With more than one host connected, a remote session could show the worktree badge of a local folder with the same path. Badges are now looked up per host, and are not shown when the plugin cannot tell which host it runs on.
+
 ## [0.2.1] - 2026-11-21
 
 ### Fixed

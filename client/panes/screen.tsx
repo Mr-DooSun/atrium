@@ -39,7 +39,7 @@ import {
   visibleRange,
   type PaneRef,
 } from "./layout";
-import { Pane, type PaneLink, type PaneReorderHandlers, type PaneResize } from "./pane";
+import { NO_TEXT_SELECT, Pane, type PaneLink, type PaneReorderHandlers, type PaneResize } from "./pane";
 import { setPaneWidth, setPanes, usePaneWidths, usePanes } from "./store";
 
 const GAP = 12;
@@ -444,7 +444,9 @@ export function PanesScreen(props: PluginScreenProps) {
         >
           {/* Panes sit at their offsets, so any subset can mount: the visible ones plus the one
               being dragged, which must not unmount mid-gesture. */}
-          <View style={{ width: total, height: Math.max(240, scrollHeight - PAD * 2) }}>
+          {/* No text selection while a pane is moved or resized: dragging over the chats would
+              select them, and a selection under the pointer can end the gesture (NO_TEXT_SELECT). */}
+          <View style={[{ width: total, height: Math.max(240, scrollHeight - PAD * 2) }, reordering || resizing ? NO_TEXT_SELECT : null]}>
             {mounted.map(({ pane, index }) => (
               <View key={pane.key} style={{ position: "absolute", left: offsets[index], top: 0, bottom: 0, width: widths[index] }}>
                 <Pane
