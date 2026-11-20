@@ -25,6 +25,7 @@ features or behavior changes go in a minor release (0.2.0).
 - Claude Code marketplace sources must be `owner/repo`, an https or `git@` URL, or an absolute path. Relative paths such as `./foo` are now rejected.
 - Commands and errors shown in the app no longer include credentials, query strings or fragments from URLs.
 - More natural wording in every toolbox language, including French typography (no-break spaces before `:`, `;`, `?` and `!`) and consistent terms in Russian and Japanese.
+- Reworded the General and panes screen text in every non-English language to read like native app text: Korean, Japanese and Simplified Chinese now use one word for "pane" as the sidebar does, French uses its spacing rules and apostrophes, and dashes in sentences are replaced by normal punctuation.
 
 ### Fixed
 
