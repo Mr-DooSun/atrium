@@ -8,7 +8,7 @@ import { panesText } from "../chat-strings";
 import { TITLE_LINE, type Palette } from "../look";
 import { ProviderMark, StatusMark, agentBucket, isAgentTurnActive } from "../marks";
 import { readableOn } from "./layout";
-import { applyOlder, applyTimelineEvent, clearTimelineError, displayItems, errorBanner, rowWording, shouldAutoRetry, type AgentTimeline, type Timelines } from "./timeline";
+import { applyOlder, applyTimelineEvent, clearTimelineError, displayItems, errorBanner, AUTO_RETRY_DELAY_MS, armAutoRetry, autoRetryDue, rowWording, type AgentTimeline, type Timelines } from "./timeline";
 
 export interface PaneLink {
   /** Family color shared by every pane of the family. */
@@ -377,16 +377,22 @@ function LiveBody({
   const timelineError = timeline?.error ?? null;
   const banner = errorBanner(lost, timelineError, (timeline?.items.length ?? 0) > 0);
   // When the host comes back online (daemon restart, network drop), a pane whose subscription
-  // ended reconnects by itself, once (shouldAutoRetry). The status this body mounted with is the
-  // starting point, so the retry's own fresh body never repeats it.
+  // ended reconnects by itself, once (armAutoRetry / autoRetryDue). The arm lives in this body,
+  // so the retry's fresh body starts unarmed and a failing retry does not repeat.
   const hostStatus = useHosts().find((h) => h.serverId === agent.hostId)?.status;
-  const prevHostStatus = useRef(hostStatus);
+  const armed = useRef(false);
   useEffect(() => {
-    const prev = prevHostStatus.current;
-    prevHostStatus.current = hostStatus;
-    if (shouldAutoRetry(prev, hostStatus, banner)) onRetry();
-    // Only a status change is a reconnect; banner and onRetry are read as of that render.
-  }, [hostStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+    armed.current = armAutoRetry(armed.current, hostStatus);
+  }, [hostStatus]);
+  useEffect(() => {
+    if (!autoRetryDue(armed.current, hostStatus, banner)) return;
+    const timer = setTimeout(() => {
+      armed.current = false;
+      onRetry();
+    }, AUTO_RETRY_DELAY_MS);
+    // Unmounted, or the host dropped again or the pane recovered within the delay: not now.
+    return () => clearTimeout(timer);
+  }, [hostStatus, banner, onRetry]);
   useEffect(() => {
     if (timelineError) console.warn(`[atrium] chat pane ${agent.id}: timeline error: ${timelineError}`);
   }, [timelineError, agent.id]);

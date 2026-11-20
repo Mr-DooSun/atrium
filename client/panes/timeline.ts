@@ -188,19 +188,32 @@ export type ErrorBanner = "liveLost" | "reconnecting" | "loadFailed" | null;
 export type HostStatus = PluginHostSummary["status"] | undefined;
 
 /**
- * Whether a pane retries by itself on this host status change: only when the host comes back
- * online from any other known state (offline, connecting, error, idle), and only for a pane
- * whose subscription ended (liveLost). A server error (reconnecting: the server retries on its
- * own) and a first load that failed (loadFailed) are left alone.
+ * Automatic retry after a reconnect, in two steps a pane runs on every render:
  *
- * One retry per reconnect: the caller asks on status changes only, and a retry remounts the
- * pane's live part with the current status (online) as its starting point, so if that retry
- * fails too, nothing more happens until the host drops and comes back again. A pane the user
- * already retried is connecting, not liveLost, so it is not retried twice.
+ * 1. `armAutoRetry`: the pane arms itself once it sees its host in any known state other than
+ *    online (offline, connecting, error, idle), including the state it mounted in, and stays
+ *    armed until the retry is used.
+ * 2. `autoRetryDue`: an armed pane whose subscription ended (liveLost) retries once the host is
+ *    online, after AUTO_RETRY_DELAY_MS (the plugin's server side may still be starting just
+ *    after the host comes back). The order of the two does not matter: the host may come back
+ *    first and the subscription end afterwards, or the other way round.
+ *
+ * Only liveLost: a server error (reconnecting: the server retries on its own) and a first load
+ * that failed (loadFailed) are left alone. A retry remounts the pane's live part unarmed while
+ * the host is online, so if that retry fails too nothing more happens until the host drops and
+ * comes back. A pane the user already retried is connecting, not liveLost, so it is not retried
+ * twice. A host unknown to the app (undefined) never arms.
  */
-export function shouldAutoRetry(prev: HostStatus, next: HostStatus, banner: ErrorBanner): boolean {
-  return banner === "liveLost" && next === "online" && prev !== undefined && prev !== "online";
+export function armAutoRetry(armed: boolean, status: HostStatus): boolean {
+  return armed || (status !== undefined && status !== "online");
 }
+
+export function autoRetryDue(armed: boolean, status: HostStatus, banner: ErrorBanner): boolean {
+  return armed && status === "online" && banner === "liveLost";
+}
+
+/** How long after the host is back (and the pane lost) the automatic retry waits. */
+export const AUTO_RETRY_DELAY_MS = 1000;
 
 /**
  * The timeline with the agent's error cleared (a retry starts clean); unchanged when it has none.

@@ -9,7 +9,7 @@ features or behavior changes go in a minor release (0.2.0).
 
 ### Changed
 
-- A pane whose live updates stopped (daemon restart, lost connection) now reconnects by itself once its host is back online, instead of waiting for the retry button. If that retry fails too, the button stays until the next reconnect.
+- A pane whose live updates stopped (daemon restart, lost connection) now reconnects by itself shortly after its host is back online, instead of waiting for the retry button. If that retry fails too, the button stays until the next reconnect.
 
 ### Fixed
 

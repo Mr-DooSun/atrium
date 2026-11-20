@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EMPTY_TIMELINE, mergeItems, applyTimelineEvent, applyOlder, displayItems, overlaps, toolStatusText, rowWording, errorBanner, clearTimelineError } from '../client/panes/timeline.ts';
+import { EMPTY_TIMELINE, mergeItems, applyTimelineEvent, applyOlder, displayItems, overlaps, toolStatusText, rowWording, errorBanner, clearTimelineError, armAutoRetry, autoRetryDue, AUTO_RETRY_DELAY_MS, type ErrorBanner, type HostStatus } from '../client/panes/timeline.ts';
 import type { ChatItem } from '../shared/chat/rpc.ts';
 import { COMPACTED_FALLBACK_TEXT, COMPACTING_FALLBACK_TEXT, toChatItem } from '../shared/chat/convert.ts';
 const row=(seq:number,text=String(seq)):ChatItem=>({id:String(seq),seq,kind:'assistant',text});
@@ -156,4 +156,53 @@ test('the compaction fallback constants are exactly the text the converter produ
  assert.equal(convert('completed').text,COMPACTED_FALLBACK_TEXT);
  assert.equal(convert('running').text,COMPACTING_FALLBACK_TEXT);
  assert.equal(COMPACTED_FALLBACK_TEXT,'Context compacted'); assert.equal(COMPACTING_FALLBACK_TEXT,'Compacting context');
+});
+
+// Compile-time: errorBanner's declared return type is exactly ErrorBanner (tsc fails otherwise).
+type Same<A,B>=(<T>()=>T extends A?1:2) extends (<T>()=>T extends B?1:2)?true:false;
+const errorBannerReturnsErrorBanner:Same<ReturnType<typeof errorBanner>,ErrorBanner>=true;
+test('errorBanner returns only ErrorBanner values',()=>{
+ assert.equal(errorBannerReturnsErrorBanner,true);
+ const all:ErrorBanner[]=[];
+ for(const lost of [true,false]) for(const error of [null,'x']) for(const hasRows of [true,false]) all.push(errorBanner(lost,error,hasRows));
+ for(const b of all) assert.ok(b===null||['liveLost','reconnecting','loadFailed'].includes(b));
+});
+test('AUTO_RETRY_DELAY_MS is one second',()=>{ assert.equal(AUTO_RETRY_DELAY_MS,1000); });
+test('armAutoRetry arms on any known non-online status and never disarms',()=>{
+ assert.equal(armAutoRetry(false,'online'),false); assert.equal(armAutoRetry(false,undefined),false);
+ for(const status of ['offline','connecting','error','idle'] as const) assert.equal(armAutoRetry(false,status),true,status);
+ assert.equal(armAutoRetry(true,'online'),true); assert.equal(armAutoRetry(true,undefined),true);
+ for(const status of ['offline','connecting','error','idle'] as const) assert.equal(armAutoRetry(true,status),true,status);
+});
+test('autoRetryDue needs the armed flag, an online host and a lost subscription',()=>{
+ assert.equal(autoRetryDue(true,'online','liveLost'),true);
+ const no:[boolean,HostStatus,ErrorBanner][]=[
+  [false,'online','liveLost'],[true,'offline','liveLost'],[true,'connecting','liveLost'],[true,undefined,'liveLost'],
+  [true,'online','reconnecting'],[true,'online','loadFailed'],[true,'online',null],
+ ];
+ for(const [armed,status,banner] of no) assert.equal(autoRetryDue(armed,status,banner),false,`${armed} ${status} ${banner}`);
+});
+test('auto retry scenario: the host drops and returns before the subscription is seen lost',()=>{
+ let a=false;
+ a=armAutoRetry(a,'online'); assert.equal(a,false);
+ a=armAutoRetry(a,'offline'); assert.equal(a,true);
+ a=armAutoRetry(a,'online'); assert.equal(a,true);
+ assert.equal(autoRetryDue(a,'online',null),false);
+ assert.equal(autoRetryDue(a,'online','liveLost'),true);
+});
+test('auto retry scenario: the subscription is lost first, while the host is still offline',()=>{
+ const a=armAutoRetry(false,'offline');
+ assert.equal(autoRetryDue(a,'offline','liveLost'),false);
+ assert.equal(autoRetryDue(a,'online','liveLost'),true);
+});
+test('auto retry scenario: a retry starts a fresh body with the flag cleared, so it cannot loop',()=>{
+ const a=false;
+ assert.equal(armAutoRetry(a,'online'),false);
+ assert.equal(autoRetryDue(a,'online','liveLost'),false);
+ assert.equal(armAutoRetry(a,'offline'),true,'a later drop arms it again');
+});
+test('known limitation: a drop and return batched into one update is never seen, so nothing is armed and no retry happens',()=>{
+ const a=armAutoRetry(false,'online');
+ assert.equal(a,false);
+ assert.equal(autoRetryDue(a,'online','liveLost'),false);
 });
