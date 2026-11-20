@@ -111,7 +111,10 @@ async function checkedMarketplacePlan(profile: ProfileRuntime, action: Marketpla
   return marketplacePlan(profile, action, name.value);
 }
 
-const catalogs = new Map<string, { expires: number; loading: Promise<CatalogResult> }>();
+/** CLI output kept raw, so each call can mark installs for its own project directory. */
+interface RawCatalog { plugins: unknown; markets: unknown; meta: Map<string, ManifestMeta> }
+
+const catalogs = new Map<string, { expires: number; loading: Promise<RawCatalog> }>();
 
 function catalogKey(p: ProfileRuntime) {
   return JSON.stringify([p.id, p.configHome, p.command, p.args]);
@@ -139,7 +142,15 @@ async function loadCatalog(p: ProfileRuntime) {
     read(p, ["plugin", "marketplace", "list", "--json"]),
   ]);
   const marketData = parseOutput(markets);
-  return parseCatalog(parseOutput(plugins), marketData, await manifestMeta(marketData));
+  const raw: RawCatalog = { plugins: parseOutput(plugins), markets: marketData, meta: await manifestMeta(marketData) };
+  // Validate once up front so a bad shape fails the load (and is not cached).
+  parseCatalog(raw.plugins, raw.markets, raw.meta, null);
+  return raw;
+}
+
+async function catalogFor(p: ProfileRuntime, cwd: string | null): Promise<CatalogResult> {
+  const raw = await cachedCatalog(p);
+  return parseCatalog(raw.plugins, raw.markets, raw.meta, cwd);
 }
 
 async function cachedCatalog(p: ProfileRuntime) {
@@ -275,7 +286,7 @@ export const claudeAdapter: ProviderAdapter = {
   async listInstalled(profile, cwd) {
     const p = runtime(profile);
     const [plugins, meta] = await Promise.all([
-      read(p, ["plugin", "list", "--json"], cwd).then((text) => parseInstalled(parseOutput(text))),
+      read(p, ["plugin", "list", "--json"], cwd).then((text) => parseInstalled(parseOutput(text), cwd ?? null)),
       knownManifestMeta(p),
     ]);
     return plugins.map((plugin) => {
@@ -283,16 +294,16 @@ export const claudeAdapter: ProviderAdapter = {
       return m ? { ...plugin, author: m.author, homepage: m.homepage, categories: m.categories, iconUrl: null } : plugin;
     });
   },
-  async listCatalog(profile, query) {
+  async listCatalog(profile, query, cwd) {
     const p = runtime(profile);
-    return filterCatalog(await cachedCatalog(p), query);
+    return filterCatalog(await catalogFor(p, cwd ?? null), query);
   },
   async previewAction(profile, action, id, marketplace, cwd, scope) {
     const p = runtime(profile);
     const plan = needsProject(pluginPreview(p, action, id, marketplace, scope ?? null), scope ?? null, cwd);
     const fullId = plan.command.at(-1)!;
     const market = fullId.split("@")[1] ?? marketplace;
-    const catalog = await cachedCatalog(p).catch(() => null);
+    const catalog = await catalogFor(p, null).catch(() => null);
     const candidates = catalog?.plugins.filter(plugin => plugin.id === fullId || (!market && plugin.name === id));
     const match = candidates?.length === 1 ? candidates[0] : null;
     return { ...plan, source: match?.source ?? match?.marketplace ?? market };

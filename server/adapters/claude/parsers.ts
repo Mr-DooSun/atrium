@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { z } from "zod";
 import type { AuthState, CatalogPlugin, InstalledPlugin, Marketplace, McpServer } from "../../../shared/toolbox/types";
 import type { CatalogResult } from "../../core/adapter";
@@ -69,11 +71,53 @@ export function failureReason(stdout: string, stderr: string, secrets: string[])
 
 const installedSchema = z.array(z.object({
   id: z.string(), enabled: z.boolean().optional(), version: z.string().optional(), scope: z.string().optional(),
-  installPath: z.string().optional(), description: z.string().optional(),
+  installPath: z.string().optional(), description: z.string().optional(), projectPath: z.string().optional(),
 }));
 
-export function parseInstalled(data: unknown): InstalledPlugin[] {
-  return installedSchema.parse(data).map(p => {
+/** Scopes Claude records per project directory (`projectPath`). Everything else (user, synced,
+ *  managed ...) applies everywhere. */
+const PROJECT_SCOPES = new Set(["project", "local"]);
+
+function samePath(a: string, b: string): boolean {
+  const canonical = (path: string) => {
+    try {
+      return realpathSync.native(path);
+    } catch {
+      return resolve(path);
+    }
+  };
+  return resolve(a) === resolve(b) || canonical(a) === canonical(b);
+}
+
+/**
+ * `claude plugin list --json` reports installs of every project on the machine. Keep what applies
+ * to `cwd`: everything not tied to a project, plus project/local installs whose projectPath is
+ * `cwd`. `cwd` null = no project open, so project/local installs are dropped. `undefined` keeps
+ * everything (raw view).
+ */
+export function appliesTo(entry: { scope?: string; projectPath?: string }, cwd: string | null | undefined): boolean {
+  if (cwd === undefined || !entry.scope || !PROJECT_SCOPES.has(entry.scope) || !entry.projectPath) return true;
+  return cwd !== null && samePath(entry.projectPath, cwd);
+}
+
+export function parseInstalled(data: unknown, cwd?: string | null): InstalledPlugin[] {
+  const all = installedSchema.parse(data);
+  let entries = all.filter(p => appliesTo(p, cwd));
+  if (cwd) {
+    // A symlinked and a real path to the same project are two records of one install: keep one
+    // per id and scope, preferring the record made under the exact path. CLI order is kept.
+    const exact = (p: { projectPath?: string }) => !!p.projectPath && resolve(p.projectPath) === resolve(cwd);
+    const keep = new Set<(typeof all)[number]>();
+    const seen = new Set<string>();
+    for (const p of [...entries.filter(exact), ...entries.filter(p => !exact(p))]) {
+      const key = p.scope && PROJECT_SCOPES.has(p.scope) ? p.id + "\u0000" + p.scope : null;
+      if (key && seen.has(key)) continue;
+      if (key) seen.add(key);
+      keep.add(p);
+    }
+    entries = entries.filter(p => keep.has(p));
+  }
+  return entries.map(p => {
     const [name, market] = p.id.split("@");
     return { id: p.id, name, marketplace: market ?? null, version: p.version ?? null,
       enabled: p.enabled ?? null, source: p.installPath ?? null, description: p.description ?? null,
@@ -127,7 +171,13 @@ export function parseManifestMeta(manifest: unknown, market: string, into = new 
   return into;
 }
 
-export function parseCatalog(data: unknown, marketData: unknown, meta = new Map<string, ManifestMeta>()): CatalogResult {
+export function parseCatalog(
+  data: unknown,
+  marketData: unknown,
+  meta = new Map<string, ManifestMeta>(),
+  /** Marks `installed` only for installs that apply here; see parseInstalled. */
+  cwd?: string | null,
+): CatalogResult {
   const { installed, available } = z.object({
     installed: installedSchema, available: z.array(z.object({
       pluginId: z.string(), name: z.string(), marketplaceName: z.string(),
@@ -137,7 +187,7 @@ export function parseCatalog(data: unknown, marketData: unknown, meta = new Map<
   }).parse(data);
   const plugins = new Map<string, CatalogPlugin>();
   const installedVersions = new Map<string, string | null>();
-  for (const p of parseInstalled(installed)) {
+  for (const p of parseInstalled(installed, cwd)) {
     installedVersions.set(p.id, p.version);
     const m = meta.get(p.id);
     plugins.set(p.id, { id: p.id, name: p.name, description: p.description, marketplace: p.marketplace,

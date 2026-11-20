@@ -213,7 +213,7 @@ export function registerToolbox(server: PluginServerContext) {
     try {
       const { adapter, profile } = await ecosystem(paseo, eco, profileId);
       const [result, updates] = await Promise.all([
-        adapter.listCatalog(profile?.runtime ?? null, query),
+        adapter.listCatalog(profile?.runtime ?? null, query, checkedCwd(input.cwd)),
         updatesFor(adapter, profile, eco, checkedCwd(input.cwd)),
       ]);
       const categories = [...new Set(result.plugins.flatMap((p) => p.categories))].sort((a, b) => a.localeCompare(b));

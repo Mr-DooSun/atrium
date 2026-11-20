@@ -38,7 +38,8 @@ export interface PluginEcosystemAdapter {
   /** `cwd`: the agent's project, so project/local-scoped plugins are listed and targeted too. */
   listInstalled(profile: ProfileRuntime | null, cwd?: string | null): Promise<InstalledPlugin[]>;
   /** Browse marketplaces; `query` filters by name/description, "" lists everything. */
-  listCatalog(profile: ProfileRuntime | null, query: string): Promise<CatalogResult>;
+  /** `cwd`: the agent's project, so `installed` reflects project/local installs there too. */
+  listCatalog(profile: ProfileRuntime | null, query: string, cwd?: string | null): Promise<CatalogResult>;
   /** Describe the command an action would run without running it. Must not mutate anything. */
   previewAction(
     profile: ProfileRuntime | null,

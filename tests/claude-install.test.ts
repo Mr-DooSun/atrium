@@ -245,3 +245,71 @@ process.exitCode = 1;
     assert.equal((await claudeAdapter.previewMarketplaceAction!(profile, "add", value)).supported, false);
   });
 });
+
+describe("installs are scoped to the open project", () => {
+  // `claude plugin list --json` reports installs of every project on the machine.
+  const listed = (project: string) => [
+    { id: "base@demo", scope: "user" },
+    { id: "synced@demo", scope: "synced" },
+    { id: "eli5@demo", scope: "local", projectPath: "/elsewhere/a" },
+    { id: "eli5@demo", scope: "local", projectPath: "/elsewhere/b" },
+    { id: "team@demo", scope: "project", projectPath: "/elsewhere/a" },
+    { id: "here@demo", scope: "project", projectPath: project },
+    { id: "mine@demo", scope: "local", projectPath: project },
+  ];
+  let lister = profile;
+  before(async () => {
+    const command = join(dir, "claude-lister");
+    await writeFile(command, `#!/usr/bin/env node
+const project = ${JSON.stringify(dir)};
+const installed = ${JSON.stringify(listed("__PROJECT__"))}.map(p => p.projectPath === "__PROJECT__" ? { ...p, projectPath: project } : p);
+const args = process.argv.slice(2);
+if (args.includes("marketplace")) console.log("[]");
+else if (args.includes("--available")) console.log(JSON.stringify({ installed, available: [
+  { pluginId: "eli5@demo", name: "eli5", marketplaceName: "demo" },
+  { pluginId: "here@demo", name: "here", marketplaceName: "demo" },
+] }));
+else console.log(JSON.stringify(installed));
+`);
+    await chmod(command, 0o700);
+    lister = { ...profile, id: "claude-lister", command };
+  });
+
+  test("no project open: only installs that apply everywhere", async () => {
+    const ids = (await claudeAdapter.listInstalled(lister, null)).map((p) => `${p.id}:${p.scope}`);
+    assert.deepEqual(ids, ["base@demo:user", "synced@demo:synced"]);
+  });
+
+  test("a project open: plus that project's project/local installs, not other projects'", async () => {
+    const ids = (await claudeAdapter.listInstalled(lister, dir)).map((p) => `${p.id}:${p.scope}`);
+    assert.deepEqual(ids, ["base@demo:user", "synced@demo:synced", "here@demo:project", "mine@demo:local"]);
+  });
+
+  test("catalog `installed` follows the same rule", async () => {
+    const flags = async (cwd: string | null) => Object.fromEntries(
+      (await claudeAdapter.listCatalog(lister, "", cwd)).plugins.map((p) => [p.id, p.installed]));
+    assert.equal((await flags(null))["eli5@demo"], false);
+    assert.equal((await flags(null))["here@demo"], false);
+    assert.equal((await flags(dir))["here@demo"], true);
+    assert.equal((await flags(dir))["eli5@demo"], false);
+  });
+});
+
+test("one install recorded under a symlink and the real path shows once", async () => {
+  const { symlink } = await import("node:fs/promises");
+  const { parseInstalled } = await import("../server/adapters/claude/parsers.ts");
+  const real = await mkdtemp(join(tmpdir(), "atrium-claude-real-"));
+  const link = real + "-link";
+  await symlink(real, link);
+  try {
+    const rows = parseInstalled([
+      { id: "eli5@demo", scope: "local", projectPath: link },
+      { id: "eli5@demo", scope: "local", projectPath: real },
+      { id: "base@demo", scope: "user" },
+    ], real);
+    assert.deepEqual(rows.map((p) => `${p.id}:${p.scope}`), ["eli5@demo:local", "base@demo:user"]);
+  } finally {
+    await rm(link);
+    await rm(real, { recursive: true });
+  }
+});
