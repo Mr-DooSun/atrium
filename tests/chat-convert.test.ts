@@ -68,3 +68,9 @@ test('tool updates use call id while retaining event sequence, with sequence id 
  assert.equal(first.id,'tool:c1'); assert.equal(last.id,'tool:c1'); assert.equal(first.seq,2); assert.equal(last.seq,5);
  assert.equal(ChatItem.safeParse(last).success,true); assert.equal(convert({type:'tool_call',name:'shell'},7).id,'7');
 });
+
+test('older history input accepts optional epoch and validates its type',()=>{
+ assert.deepEqual(chatOlder.input.parse({agentId:'a',beforeSeq:3}),{agentId:'a',beforeSeq:3,limit:100});
+ assert.deepEqual(chatOlder.input.parse({agentId:'a',beforeSeq:3,epoch:'epoch-1'}),{agentId:'a',beforeSeq:3,limit:100,epoch:'epoch-1'});
+ assert.equal(chatOlder.input.safeParse({agentId:'a',beforeSeq:3,epoch:123}).success,false);
+});

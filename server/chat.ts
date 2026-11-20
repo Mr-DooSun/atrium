@@ -12,9 +12,19 @@ export const CHAT_DIR = join(homedir(), ".paseo-chat");
 
 type TimelinePage = Awaited<ReturnType<PaseoAgentTimelineHandle["refetch"]>>;
 type ChatEvent = z.infer<typeof chatTimelines.event>;
+type Observation = { stop?: PaseoAgentTimelineSubscription; ready: boolean };
 
-function chatItems(page: TimelinePage): ChatItem[] {
-  return page.entries.map(toChatItem).sort((a, b) => a.seq - b.seq);
+const retryDelays = [1000, 2000, 5000, 10_000, 30_000];
+const maxPendingRows = 2000;
+
+function chatPage(page: TimelinePage, limit: number, beforeSeq = Infinity) {
+  const entries = page.entries
+    .filter((entry) => entry.seqStart < beforeSeq)
+    .sort((a, b) => a.seqStart - b.seqStart);
+  return {
+    items: entries.slice(-limit).map(toChatItem),
+    hasMore: page.hasOlder || entries.length > limit,
+  };
 }
 
 function observeTimeline(
@@ -22,61 +32,13 @@ function observeTimeline(
   tail: number,
   { paseo, push, signal }: PluginSubscriptionContext<ChatEvent>,
 ): void {
-  let stop: PaseoAgentTimelineSubscription | undefined;
-  let active = true;
-  let ready = false;
-  let fetching = false;
+  let observation: Observation | undefined;
+  let fetching: Observation | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryAttempt = 0;
   let generation = 0;
   let epoch: string | undefined;
   let pending: { item: ChatItem; epoch?: string }[] = [];
-
-  function release() {
-    active = false;
-    pending = [];
-    signal.removeEventListener("abort", release);
-    stop?.();
-  }
-
-  function emit(event: ChatEvent) {
-    if (!signal.aborted) void push(event).catch(() => {});
-  }
-
-  function report(error: unknown) {
-    emit({ type: "error", agentId, message: error instanceof Error ? error.message : String(error) });
-  }
-
-  function fail(error: unknown) {
-    if (!active) return;
-    release();
-    report(error);
-  }
-
-  async function refreshSnapshot(timeline: PaseoAgentTimelineHandle) {
-    if (!active || !ready || fetching) return;
-    fetching = true;
-    const requestedGeneration = generation;
-    try {
-      const page = await timeline.refetch({ direction: "tail", limit: tail, projection: "canonical" });
-      if (!active || requestedGeneration !== generation) return;
-      epoch = page.epoch;
-      emit({ type: "snapshot", agentId, epoch, items: chatItems(page), hasMore: page.hasOlder });
-      const items = pending
-        .filter((row) => (row.epoch === undefined || row.epoch === epoch) && row.item.seq >= page.window.nextSeq)
-        .map(({ item }) => item)
-        .sort((a, b) => a.seq - b.seq);
-      pending = [];
-      if (items.length) emit({ type: "append", agentId, epoch, items });
-    } catch (error) {
-      if (active && requestedGeneration === generation) {
-        pending = [];
-        report(error);
-      }
-    } finally {
-      fetching = false;
-      // A replacement or reconnect can arrive while the previous page is in flight.
-      if (requestedGeneration !== generation) void refreshSnapshot(timeline);
-    }
-  }
 
   function invalidate() {
     generation += 1;
@@ -84,49 +46,132 @@ function observeTimeline(
     pending = [];
   }
 
-  if (signal.aborted) return;
-  signal.addEventListener("abort", release, { once: true });
-  try {
-    const timeline = paseo.agents.ref(agentId).timeline;
-    stop = timeline.subscribe((update) => {
-      if (!active) return;
-      switch (update.event.type) {
-        case "error":
-          fail(update.event.error);
-          return;
-        case "replacement":
-        case "subscription_restored":
-          invalidate();
-          void refreshSnapshot(timeline);
-          return;
-        case "timeline": {
-          if (!("seq" in update) || update.seq === undefined) return;
-          const item = toChatItem({
-            item: update.event.item,
-            seqStart: update.seq,
-            timestamp: update.timestamp,
-          });
-          if (epoch !== undefined && update.epoch !== undefined && epoch !== update.epoch) {
+  function releaseObservation() {
+    const previous = observation;
+    observation = undefined;
+    invalidate();
+    previous?.stop?.();
+  }
+
+  function release() {
+    clearTimeout(retryTimer);
+    retryTimer = undefined;
+    releaseObservation();
+  }
+
+  function emit(event: ChatEvent) {
+    if (!signal.aborted) void push(event).catch(() => {});
+  }
+
+  function scheduleRetry(error: unknown, attempt: () => void) {
+    if (signal.aborted) return;
+    clearTimeout(retryTimer);
+    const delay = retryDelays[retryAttempt];
+    const firstFailure = retryAttempt === 0;
+    retryAttempt = Math.min(retryAttempt + 1, retryDelays.length - 1);
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      attempt();
+    }, delay);
+    if (firstFailure) {
+      emit({ type: "error", agentId, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async function refreshSnapshot(timeline: PaseoAgentTimelineHandle, current: Observation) {
+    if (signal.aborted || observation !== current || !current.ready || retryTimer || fetching === current) return;
+    fetching = current;
+    const requestedGeneration = generation;
+    try {
+      const page = await timeline.refetch({ direction: "tail", limit: tail, projection: "projected" });
+      if (observation !== current || requestedGeneration !== generation) return;
+      const snapshot = chatPage(page, tail);
+      epoch = page.epoch;
+      retryAttempt = 0;
+      emit({ type: "snapshot", agentId, epoch, ...snapshot });
+      // Projected entries already cover merged live chunks before the daemon's next sequence.
+      const items = pending
+        .filter((row) => (row.epoch === undefined || row.epoch === epoch) && row.item.seq >= page.window.nextSeq)
+        .map(({ item }) => item)
+        .sort((a, b) => a.seq - b.seq);
+      pending = [];
+      if (items.length) emit({ type: "append", agentId, epoch, items });
+    } catch (error) {
+      if (observation === current && requestedGeneration === generation) {
+        pending = [];
+        scheduleRetry(error, () => void refreshSnapshot(timeline, current));
+      }
+    } finally {
+      if (fetching === current) fetching = undefined;
+      if (observation === current && requestedGeneration !== generation) {
+        void refreshSnapshot(timeline, current);
+      }
+    }
+  }
+
+  function subscribe() {
+    if (signal.aborted) return;
+    const current: Observation = { ready: false };
+    observation = current;
+
+    function fail(error: unknown) {
+      if (observation !== current) return;
+      releaseObservation();
+      scheduleRetry(error, subscribe);
+    }
+
+    try {
+      const timeline = paseo.agents.ref(agentId).timeline;
+      const stop = timeline.subscribe((update) => {
+        if (observation !== current) return;
+        switch (update.event.type) {
+          case "error":
+            fail(update.event.error);
+            return;
+          case "replacement":
+          case "subscription_restored":
             invalidate();
-          }
-          if (epoch !== undefined) {
-            emit({ type: "append", agentId, epoch, items: [item] });
-          } else {
-            pending.push({ item, epoch: update.epoch });
-            void refreshSnapshot(timeline);
+            void refreshSnapshot(timeline, current);
+            return;
+          case "timeline": {
+            if (!("seq" in update) || update.seq === undefined) return;
+            const item = toChatItem({
+              item: update.event.item,
+              seqStart: update.seq,
+              timestamp: update.timestamp,
+            });
+            if (epoch !== undefined && update.epoch !== undefined && epoch !== update.epoch) {
+              invalidate();
+              void refreshSnapshot(timeline, current);
+            }
+            if (epoch !== undefined) {
+              emit({ type: "append", agentId, epoch, items: [item] });
+            } else {
+              if (pending.length === maxPendingRows) {
+                // The next snapshot must cover the rows discarded during this read.
+                invalidate();
+                void refreshSnapshot(timeline, current);
+              }
+              pending.push({ item, epoch: update.epoch });
+            }
           }
         }
-      }
-    });
-    // A subscription can report failure before its handle is returned.
-    if (!active) stop();
-    void stop.ready.then(() => {
-      ready = true;
-      return refreshSnapshot(timeline);
-    }).catch(fail);
-  } catch (error) {
-    fail(error);
+      });
+      current.stop = stop;
+      // Setup can report an error before the handle is returned.
+      if (observation !== current) stop();
+      void stop.ready.then(() => {
+        current.ready = true;
+        return refreshSnapshot(timeline, current);
+      }).catch(fail);
+    } catch (error) {
+      fail(error);
+    }
   }
+
+  if (signal.aborted) return;
+  signal.addEventListener("abort", release, { once: true });
+  subscribe();
 }
 
 export function registerChat(server: PluginServerContext) {
@@ -139,21 +184,26 @@ export function registerChat(server: PluginServerContext) {
     for (const agentId of new Set(agentIds)) observeTimeline(agentId, tail, context);
   });
 
-  server.handle(chatOlder, async ({ agentId, beforeSeq, limit }, { paseo }) => {
-    if (beforeSeq <= 0) return { items: [], hasMore: false };
+  server.handle(chatOlder, async ({ agentId, beforeSeq, limit, epoch }, { paseo }) => {
+    if (epoch === undefined && beforeSeq <= 0) return { items: [], hasMore: false };
     const timeline = paseo.agents.ref(agentId).timeline;
-    // The shared RPC supplies the sequence. The daemon also needs a current epoch.
-    const current = await timeline.refetch({ direction: "tail", limit: 1, projection: "canonical" });
+    let seq = Math.max(0, Math.min(Math.ceil(beforeSeq), Number.MAX_SAFE_INTEGER));
+    // Older clients supply only the sequence, so read the cursor epoch first.
+    if (epoch === undefined) {
+      const current = await timeline.refetch({ direction: "tail", limit: 1, projection: "projected" });
+      epoch = current.epoch;
+      seq = Math.min(seq, current.window.nextSeq);
+    }
     const before = await timeline.refetch({
       direction: "before",
-      cursor: { epoch: current.epoch, seq: Math.min(Math.ceil(beforeSeq), current.window.nextSeq) },
+      cursor: { epoch, seq },
       limit,
-      projection: "canonical",
+      projection: "projected",
     });
-    if (before.epoch !== current.epoch || before.staleCursor || before.reset) {
+    if (before.epoch !== epoch || before.staleCursor || before.reset) {
       throw new Error("The timeline changed while loading older history.");
     }
-    return { items: chatItems(before).filter(({ seq }) => seq < beforeSeq), hasMore: before.hasOlder };
+    return chatPage(before, limit, beforeSeq);
   });
 
   server.handle(chatLinks, async ({ agentIds }, { paseo }) => {

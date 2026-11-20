@@ -19,7 +19,16 @@ function storage(): MaybeStorage | null {
   }
 }
 
-const saved = storage()?.getItem(STORAGE_KEY);
+function readSaved(): string | null {
+  try {
+    return storage()?.getItem(STORAGE_KEY) ?? null;
+  } catch {
+    // Storage access can throw (blocked cookies, sandboxed frames): start empty.
+    return null;
+  }
+}
+
+const saved = readSaved();
 let panes: readonly PaneRef[] = parsePanes(saved);
 /** Custom widths by pane key; panes without one use the screen's default width. */
 let widths: ReadonlyMap<string, number> = parsePaneWidths(saved);

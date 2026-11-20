@@ -235,7 +235,8 @@ function ChatRow({
         accessibilityRole="button"
         accessibilityLabel={`Open ${agent.label}`}
         onPress={() => view.navigation.openAgent(reference)}
-        onLongPress={() => setMenuOpen(true)}
+        // Desktop has the hover buttons; the menu is for touch layouts only.
+        onLongPress={view.layout.compact ? () => setMenuOpen(true) : undefined}
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
         style={({ pressed }) => ({

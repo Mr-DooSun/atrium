@@ -17,10 +17,10 @@ import { panesText } from "../chat-strings";
 import { palette, type Palette } from "../look";
 import { onOpenInPanes, registerDropZone, useSessionDrag, type Rect, type SessionDragPayload } from "./drop-bus";
 import {
+  addFamilyMembers,
   addPane,
-  addPanes,
   arrangeByFamily,
-  descendantsOf,
+  familyOfferChildren,
   edgeScrollDelta,
   groupByFamily,
   insertionIndex,
@@ -30,14 +30,16 @@ import {
   PANE_MAX_WIDTH,
   PANE_MIN_WIDTH,
   parsePanes,
+  addPanes,
   removePane,
+  readableOn,
   reorderTarget,
   resolveWidths,
   rootOf,
   visibleRange,
   type PaneRef,
 } from "./layout";
-import { Pane, type PaneLink, type PaneReorderHandlers } from "./pane";
+import { Pane, type PaneLink, type PaneReorderHandlers, type PaneResize } from "./pane";
 import { setPaneWidth, setPanes, usePaneWidths, usePanes } from "./store";
 
 const GAP = 12;
@@ -56,6 +58,13 @@ function toRef(a: PaneRef | AgentRef): AgentRef {
 
 let zoneSeq = 0;
 
+/** Pane without a linked family: nothing is drawn from it, so one shared object will do. */
+const NO_LINK: PaneLink = { color: "transparent", size: 1, index: 0, depth: 0, parent: null };
+
+/** `params.agents` values already applied: remounting with the same params must not resurrect
+ *  panes the user closed since. */
+const appliedParams = new Set<string>();
+
 export function PanesScreen(props: PluginScreenProps) {
   const p = useMemo(() => palette(props.theme.colors), [props.theme.colors]);
   const { t } = useTranslation(panesText);
@@ -66,6 +75,8 @@ export function PanesScreen(props: PluginScreenProps) {
   // Panes passed in the screen's params (`agents`, the persisted form) open once.
   const paramAgents = props.params.agents;
   useEffect(() => {
+    if (!paramAgents || appliedParams.has(paramAgents)) return;
+    appliedParams.add(paramAgents);
     const incoming = parsePanes(paramAgents);
     if (incoming.length > 0) setPanes((prev) => addPanes(prev, incoming));
   }, [paramAgents]);
@@ -173,7 +184,19 @@ export function PanesScreen(props: PluginScreenProps) {
   // removes the panes that scroll in or out of view.
 
   // ── Mutations (always kept in family order) ──
-  const [familyOffer, setFamilyOffer] = useState<{ agent: AgentRef; children: AgentRef[] } | null>(null);
+  // The agent whose family is offered; what to add is recomputed live, minus panes already open.
+  const [offerAgent, setOfferAgent] = useState<AgentRef | null>(null);
+  const offerChildren = useMemo(
+    () => (offerAgent ? familyOfferChildren(offerAgent.key, allAgents, panes, parentOf) : []),
+    [offerAgent, allAgents, panes, parentOf],
+  );
+  // Gone when its pane closes (or "close all"), or when the whole family is already open.
+  const familyOffer = offerAgent && panes.some((x) => x.key === offerAgent.key) && offerChildren.length > 0
+    ? { agent: offerAgent, children: offerChildren }
+    : null;
+  useEffect(() => {
+    if (offerAgent && !familyOffer) setOfferAgent(null);
+  }, [offerAgent, familyOffer]);
   const latest = useRef({ arranged, parentOf, allAgents, widths, scrollX, contentWidth: total + PAD * 2 });
   latest.current = { arranged, parentOf, allAgents, widths, scrollX, contentWidth: total + PAD * 2 };
 
@@ -181,8 +204,7 @@ export function PanesScreen(props: PluginScreenProps) {
     const { parentOf, allAgents } = latest.current;
     const ref = toRef(payload.agent);
     setPanes((prev) => arrangeByFamily(addPane(arrangeByFamily(prev, parentOf), ref, index), parentOf));
-    const children = descendantsOf(ref.key, allAgents, parentOf);
-    setFamilyOffer(children.length > 0 ? { agent: ref, children } : null);
+    setOfferAgent(ref);
   }, []);
 
   const onClose = useCallback((agent: AgentRef) => setPanes((prev) => removePane(prev, agent.key)), []);
@@ -200,11 +222,7 @@ export function PanesScreen(props: PluginScreenProps) {
   // family, so a queued request is never added twice.
   useEffect(
     () =>
-      onOpenInPanes((payload) => {
-        const { parentOf, allAgents } = latest.current;
-        const children = descendantsOf(payload.agent.key, allAgents, parentOf);
-        setFamilyOffer(children.length > 0 ? { agent: toRef(payload.agent), children } : null);
-      }),
+      onOpenInPanes((payload) => setOfferAgent(toRef(payload.agent))),
     [],
   );
 
@@ -306,14 +324,25 @@ export function PanesScreen(props: PluginScreenProps) {
   }, [reordering]);
 
   // ── Resize from a pane's right edge ──
-  const onResize = useCallback((agent: AgentRef, next: number | null, done: boolean) => {
-    if (!done) {
-      if (next !== null) setResizing({ key: agent.key, width: Math.max(PANE_MIN_WIDTH, Math.min(PANE_MAX_WIDTH, next)) });
+  const onResize = useCallback((agent: AgentRef, change: PaneResize) => {
+    if (change.kind === "live") {
+      setResizing({ key: agent.key, width: Math.max(PANE_MIN_WIDTH, Math.min(PANE_MAX_WIDTH, change.width)) });
       return;
     }
     setResizing(null);
-    setPaneWidth(agent.key, next);
+    // Only a real drag saves a width; a click or cancelled gesture keeps following the default.
+    if (change.kind === "commit") setPaneWidth(agent.key, change.width);
+    else if (change.kind === "reset") setPaneWidth(agent.key, null);
   }, []);
+
+  // With no panes the ScrollView unmounts; the next one starts at offset 0, so must we, or
+  // visibleRange and drop indexes would use the old offset.
+  const empty = arranged.length === 0;
+  useEffect(() => {
+    if (!empty) return;
+    scrollXRef.current = 0;
+    setScrollX(0);
+  }, [empty]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -323,6 +352,20 @@ export function PanesScreen(props: PluginScreenProps) {
     scrollXRef.current = e.nativeEvent.contentOffset.x;
     setScrollX(e.nativeEvent.contentOffset.x);
   };
+  // Stable AgentRef per pane key, so memo(Pane) holds across scroll and resize renders.
+  const refCache = useRef(new Map<string, AgentRef>());
+  const refFor = (pane: PaneRef): AgentRef => {
+    const hit = refCache.current.get(pane.key);
+    if (hit && hit.hostId === pane.hostId && hit.id === pane.id) return hit;
+    const ref = toRef(pane);
+    refCache.current.set(pane.key, ref);
+    return ref;
+  };
+  useEffect(() => {
+    const keys = new Set(panes.map((x) => x.key));
+    for (const key of refCache.current.keys()) if (!keys.has(key)) refCache.current.delete(key);
+  }, [panes]);
+
   const hoverX = hoverIndex === null ? null : hoverIndex >= arranged.length ? total + GAP / 2 : (offsets[hoverIndex] ?? 0) - GAP / 2;
 
   return (
@@ -334,14 +377,11 @@ export function PanesScreen(props: PluginScreenProps) {
           p={p}
           onAccept={() => {
             const { parentOf } = latest.current;
-            setPanes((prev) => {
-              const arrangedPrev = arrangeByFamily(prev, parentOf);
-              const at = arrangedPrev.findIndex((x) => x.key === familyOffer.agent.key);
-              return arrangeByFamily(addPanes(arrangedPrev, familyOffer.children, at < 0 ? undefined : at + 1), parentOf);
-            });
-            setFamilyOffer(null);
+            const { agent, children } = familyOffer;
+            setPanes((prev) => addFamilyMembers(prev, parentOf, agent.key, children.map(toRef)));
+            setOfferAgent(null);
           }}
-          onDismiss={() => setFamilyOffer(null)}
+          onDismiss={() => setOfferAgent(null)}
         />
       ) : null}
       {arranged.length === 0 ? (
@@ -383,11 +423,11 @@ export function PanesScreen(props: PluginScreenProps) {
             {mounted.map(({ pane, index }) => (
               <View key={pane.key} style={{ position: "absolute", left: offsets[index], top: 0, bottom: 0, width: widths[index] }}>
                 <Pane
-                  agent={toRef(pane)}
+                  agent={refFor(pane)}
                   width={widths[index]}
                   gap={GAP}
                   p={p}
-                  link={linkOf.get(pane.key) ?? { color: p.guide, size: 1, index: 0, depth: 0, parent: null }}
+                  link={linkOf.get(pane.key) ?? NO_LINK}
                   otherHost={pane.hostId === ownHost ? null : pane.hostId}
                   onClose={onClose}
                   onOpen={onOpen}
@@ -470,7 +510,7 @@ function Toolbar({ count, p, onCloseAll }: { count: number; p: Palette; onCloseA
                 opacity: pressed ? 0.85 : 1,
               })}
             >
-              <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>{t("closeAll")}</Text>
+              <Text style={{ color: readableOn(p.danger), fontSize: 13, fontWeight: "600" }}>{t("closeAll")}</Text>
             </Pressable>
           </View>
         </Modal.Content>
@@ -501,9 +541,9 @@ function FamilyOffer({
       <Pressable
         accessibilityRole="button"
         onPress={onAccept}
-        style={({ pressed }) => ({ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, backgroundColor: pressed ? p.pressed : p.running })}
+        style={({ pressed }) => ({ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, backgroundColor: p.running, opacity: pressed ? 0.85 : 1 })}
       >
-        <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>{t("addFamily", { n: offer.children.length })}</Text>
+        <Text style={{ color: readableOn(p.running), fontSize: 12, fontWeight: "600" }}>{t("addFamily", { n: offer.children.length })}</Text>
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={t("dismiss")} onPress={onDismiss} hitSlop={6}>
         <Icon name="X" size={14} color={p.muted} />

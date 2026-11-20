@@ -94,3 +94,24 @@ test('edge scroll scales at edges and handles narrow or invalid viewport',()=>{
  assert.equal(L.edgeScrollDelta(10,0,0),0); assert.equal(L.edgeScrollDelta(10,20,0),0);
  assert.equal(L.edgeScrollDelta(0,0,100,0),0); assert.equal(L.edgeScrollDelta(0,0,100,-1),0);
 });
+
+test('readable text chooses contrast for hex colors and defaults to white',()=>{
+ assert.equal(L.readableOn('#000'),'#ffffff'); assert.equal(L.readableOn('#fff'),'#000000');
+ assert.equal(L.readableOn('#00ff00'),'#000000'); assert.equal(L.readableOn('#0000ff'),'#ffffff');
+ assert.equal(L.readableOn(' #FFFFFF00 '),'#000000'); assert.equal(L.readableOn('invalid'),'#ffffff');
+});
+test('family offer excludes open descendants and preserves depth first sibling order',()=>{
+ const ps=['root','b','a','grand','c','other'].map(p);
+ const parentOf=(k:string)=>({a:'root',b:'root',c:'root',grand:'a'} as Record<string,string>)[k];
+ assert.deepEqual(keys(L.familyOfferChildren('root',ps,[p('root'),p('a')],parentOf)),['b','grand','c']);
+ assert.deepEqual(L.familyOfferChildren('root',ps,ps,parentOf),[]);
+ assert.deepEqual(L.familyOfferChildren('other',ps,[],parentOf),[]);
+});
+test('family members insert after last open family member without moving existing panes',()=>{
+ const parentOf=(k:string)=>({b:'a',c:'a',d:'a',e:'a'} as Record<string,string>)[k];
+ const open=['a','b','x','y'].map(p);
+ assert.deepEqual(keys(L.addFamilyMembers(open,parentOf,'a',['c','b','d','c'].map(p))),['a','b','c','d','x','y']);
+ assert.deepEqual(keys(L.addFamilyMembers(['x','a','b','y'].map(p),parentOf,'b',['d','c'].map(p))),['x','a','b','d','c','y']);
+ assert.deepEqual(keys(L.addFamilyMembers(['x','y'].map(p),parentOf,'a',['c','d'].map(p))),['x','y','c','d']);
+ assert.deepEqual(keys(L.addFamilyMembers(open,parentOf,'a',[p('b')])),['a','b','x','y']);
+});

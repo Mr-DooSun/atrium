@@ -7,6 +7,7 @@ import { chatOlder, chatTimelines, type ChatItem } from "../../shared/chat/rpc";
 import { panesText } from "../chat-strings";
 import { TITLE_LINE, type Palette } from "../look";
 import { ProviderMark, StatusMark, agentBucket, isAgentTurnActive } from "../marks";
+import { readableOn } from "./layout";
 import { applyOlder, applyTimelineEvent, displayItems, type AgentTimeline, type Timelines } from "./timeline";
 
 export interface PaneLink {
@@ -34,11 +35,21 @@ export interface PaneProps {
   onMoveFamily(agent: AgentRef, delta: -1 | 1): void;
   /** Drag-to-reorder from the header grip, in page coordinates. Omitted: no grip. */
   reorder?: PaneReorderHandlers;
-  /** Live resize from the right-edge handle; null resets to the default width. Omitted: no handle. */
-  onResize?(agent: AgentRef, width: number | null, done: boolean): void;
+  /** Resize from the right-edge handle. Omitted: no handle. */
+  onResize?(agent: AgentRef, change: PaneResize): void;
   /** This pane is the one being dragged. */
   dragging?: boolean;
 }
+
+/**
+ * live: the handle is being dragged (not saved); commit: released after a real drag, save it;
+ * reset: double-click/tap, back to the default width; cancel: nothing changed, save nothing.
+ */
+export type PaneResize =
+  | { kind: "live"; width: number }
+  | { kind: "commit"; width: number }
+  | { kind: "reset" }
+  | { kind: "cancel" };
 
 export interface PaneReorderHandlers {
   onStart(agent: AgentRef, pageX: number): void;
@@ -97,7 +108,7 @@ export const Pane = memo(function Pane({
         ) : null}
         {linked && first ? (
           <View style={{ alignSelf: "flex-start", marginLeft: 8, paddingHorizontal: 8, borderRadius: 10, backgroundColor: link.color }}>
-            <Text numberOfLines={1} style={{ color: "#fff", fontSize: 11, lineHeight: 18, fontWeight: "600" }}>
+            <Text numberOfLines={1} style={{ color: readableOn(link.color), fontSize: 11, lineHeight: 18, fontWeight: "600" }}>
               {t("family", { n: link.size })}
             </Text>
           </View>
@@ -165,8 +176,9 @@ function DragGrip({ agent, handlers, label, p }: { agent: AgentRef; handlers: Pa
   const responder = useMemo(
     () =>
       PanResponder.create({
+        // Only a press that starts on the handle: a text-selection drag that merely crosses it
+        // must not be taken over.
         onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (e) => {
           lastX.current = pageXOf(e);
@@ -210,7 +222,7 @@ function ResizeHandle({
   agent: AgentRef;
   width: number;
   gap: number;
-  onResize(agent: AgentRef, width: number | null, done: boolean): void;
+  onResize(agent: AgentRef, change: PaneResize): void;
   label: string;
   p: Palette;
 }) {
@@ -222,33 +234,32 @@ function ResizeHandle({
   const responder = useMemo(
     () =>
       PanResponder.create({
+        // Only a press that starts on the handle: a text-selection drag that merely crosses it
+        // must not be taken over.
         onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
           start.current = latest.current.width;
           setActive(true);
         },
-        onPanResponderMove: (_e, g) => latest.current.onResize(latest.current.agent, start.current + g.dx, false),
+        onPanResponderMove: (_e, g) =>
+          latest.current.onResize(latest.current.agent, { kind: "live", width: start.current + g.dx }),
         onPanResponderRelease: (_e, g) => {
           setActive(false);
           const { agent, onResize } = latest.current;
           if (Math.abs(g.dx) < 3) {
+            // A click, not a drag: never save (that would freeze the default width).
             const now = Date.now();
-            if (now - lastTap.current < DOUBLE_TAP_MS) {
-              lastTap.current = 0;
-              onResize(agent, null, true);
-            } else {
-              lastTap.current = now;
-              onResize(agent, start.current, true);
-            }
+            const double = now - lastTap.current < DOUBLE_TAP_MS;
+            lastTap.current = double ? 0 : now;
+            onResize(agent, double ? { kind: "reset" } : { kind: "cancel" });
             return;
           }
-          onResize(agent, start.current + g.dx, true);
+          onResize(agent, { kind: "commit", width: start.current + g.dx });
         },
         onPanResponderTerminate: () => {
           setActive(false);
-          latest.current.onResize(latest.current.agent, start.current, true);
+          latest.current.onResize(latest.current.agent, { kind: "cancel" });
         },
       }),
     [],
@@ -294,29 +305,45 @@ function ParentLine({ parent, p }: { parent: AgentRef; p: Palette }) {
  * The live part of an own-host pane: its own `chatTimelines` subscription (so scrolling only
  * adds or removes this one), its rows (dropped when the pane unmounts), and the composer.
  */
-function PaneBody({ agent, p }: { agent: AgentRef; p: Palette }) {
+function PaneBody(props: { agent: AgentRef; p: Palette }) {
+  // Retry = remount: a fresh subscription and fresh rows, without touching the input schema.
+  const [nonce, setNonce] = useState(0);
+  return <LiveBody key={nonce} {...props} onRetry={() => setNonce((n) => n + 1)} />;
+}
+
+function LiveBody({ agent, p, onRetry }: { agent: AgentRef; p: Palette; onRetry(): void }) {
   const { t } = useTranslation(panesText);
   // Timelines map of one entry, so the shared pure reducers apply unchanged.
   const [state, setState] = useState<Timelines>(() => new Map());
   const input = useMemo(() => ({ agentIds: [agent.id], tail: TAIL }), [agent.id]);
-  useSubscription(chatTimelines, input, (event) => setState((s) => applyTimelineEvent(s, event)));
+  const live = useSubscription(chatTimelines, input, (event) => setState((s) => applyTimelineEvent(s, event)));
   const timeline: AgentTimeline | undefined = state.get(agent.id);
+  // After a plugin reload, daemon restart or a rejected event the subscription ends: say so
+  // instead of spinning forever or silently showing stale rows.
+  const lost = live.status === "error" ? live.error.message || t("liveLost") : live.status === "closed" ? t("liveLost") : null;
 
   const fetchOlder = useRpc(chatOlder);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderFailed, setOlderFailed] = useState(false);
   const latest = useRef(timeline);
   latest.current = timeline;
-  const loadOlder = useCallback(() => {
-    const tl = latest.current;
-    const oldest = tl?.items[0];
-    if (!tl || !oldest || !tl.hasMore || loadingOlder) return;
-    setLoadingOlder(true);
-    fetchOlder({ agentId: agent.id, beforeSeq: oldest.seq, limit: TAIL })
-      // Dropped if a snapshot replaced the rows while the page was in flight.
-      .then((page) => setState((s) => applyOlder(s, agent.id, tl.epoch, page, oldest.seq)))
-      .catch(() => undefined)
-      .finally(() => setLoadingOlder(false));
-  }, [agent.id, fetchOlder, loadingOlder]);
+  const loadOlder = useCallback(
+    (force = false) => {
+      const tl = latest.current;
+      const oldest = tl?.items[0];
+      if (!tl || !oldest || !tl.hasMore || loadingOlder) return;
+      // After a failure, only the retry button tries again (not every scroll to the top).
+      if (olderFailed && !force) return;
+      setLoadingOlder(true);
+      setOlderFailed(false);
+      fetchOlder({ agentId: agent.id, beforeSeq: oldest.seq, limit: TAIL, ...(tl.epoch ? { epoch: tl.epoch } : {}) })
+        // Dropped if a snapshot replaced the rows while the page was in flight.
+        .then((page) => setState((s) => applyOlder(s, agent.id, tl.epoch, page, oldest.seq)))
+        .catch(() => setOlderFailed(true))
+        .finally(() => setLoadingOlder(false));
+    },
+    [agent.id, fetchOlder, loadingOlder, olderFailed],
+  );
 
   // Streamed replies arrive as one row per chunk; join them for display. Newest first for the
   // inverted list, which starts at the bottom and grows upward.
@@ -324,10 +351,15 @@ function PaneBody({ agent, p }: { agent: AgentRef; p: Palette }) {
 
   return (
     <>
-        {timeline?.error ? (
-          <Text style={{ color: p.danger, fontSize: 12, padding: 10 }}>{t("loadFailed", { message: timeline.error })}</Text>
+        {lost || timeline?.error ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+            <Text style={{ flex: 1, color: p.danger, fontSize: 12 }}>{t("loadFailed", { message: lost ?? timeline?.error ?? "" })}</Text>
+            <TextButton label={t("retry")} onPress={onRetry} p={p} />
+          </View>
         ) : null}
-        {!timeline ? (
+        {!timeline && lost ? (
+          <View style={{ flex: 1 }} />
+        ) : !timeline ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <ActivityIndicator color={p.muted} />
           </View>
@@ -341,7 +373,7 @@ function PaneBody({ agent, p }: { agent: AgentRef; p: Palette }) {
             data={data}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => <Row item={item} p={p} />}
-            onEndReached={loadOlder}
+            onEndReached={() => loadOlder()}
             onEndReachedThreshold={0.5}
             initialNumToRender={20}
             windowSize={7}
@@ -351,12 +383,30 @@ function PaneBody({ agent, p }: { agent: AgentRef; p: Palette }) {
                 <View style={{ paddingVertical: 8, alignItems: "center" }}>
                   <Text style={{ color: p.muted, fontSize: 11 }}>{t("loadingOlder")}</Text>
                 </View>
+              ) : olderFailed ? (
+                <View style={{ flexDirection: "row", paddingVertical: 8, alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <Text style={{ color: p.muted, fontSize: 11 }}>{t("olderFailed")}</Text>
+                  <TextButton label={t("retry")} onPress={() => loadOlder(true)} p={p} />
+                </View>
               ) : null
             }
           />
         )}
       <Composer agent={agent} p={p} />
     </>
+  );
+}
+
+function TextButton({ label, onPress, p }: { label: string; onPress(): void; p: Palette }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      hitSlop={4}
+      style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: pressed ? p.pressed : p.hover })}
+    >
+      <Text style={{ color: p.foreground, fontSize: 11, fontWeight: "600" }}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -435,10 +485,11 @@ function Composer({ agent, p }: { agent: AgentRef; p: Palette }) {
           borderRadius: 8,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: canSend ? (pressed ? p.pressed : p.running) : p.hover,
+          backgroundColor: canSend ? p.running : p.hover,
+          opacity: canSend && pressed ? 0.85 : 1,
         })}
       >
-        {sending ? <ActivityIndicator size="small" color={p.muted} /> : <Icon name="ArrowUp" size={16} color={canSend ? "#fff" : p.muted} />}
+        {sending ? <ActivityIndicator size="small" color={p.muted} /> : <Icon name="ArrowUp" size={16} color={canSend ? readableOn(p.running) : p.muted} />}
       </Pressable>
     </View>
   );

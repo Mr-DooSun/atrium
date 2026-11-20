@@ -18,7 +18,7 @@ function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/** Converts one canonical timeline entry or its live equivalent to a display row. */
+/** Converts a projected history entry or a live timeline event to a display row. */
 export function toChatItem({ item, seqStart, timestamp }: TimelineEntry): ChatItem {
   const base = { id: String(seqStart), seq: seqStart, at: timestamp };
   const type = item?.type;

@@ -47,13 +47,14 @@ export const chatTimelines = defineSubscription({
   ]),
 });
 
-/** Fetches older timeline rows strictly before the given sequence. */
+/** Fetches older timeline rows before the given sequence, optionally pinned to the snapshot epoch. */
 export const chatOlder = defineRpc({
   name: "chat.timeline.older",
   input: z.object({
     agentId: z.string(),
     beforeSeq: z.number(),
     limit: z.number().int().min(1).max(500).default(100),
+    epoch: z.string().optional(),
   }),
   output: z.object({ items: z.array(ChatItem), hasMore: z.boolean() }),
 });

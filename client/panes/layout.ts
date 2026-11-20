@@ -402,3 +402,54 @@ export function edgeScrollDelta(pointerX: number, left: number, right: number, e
   if (pointerX > right - zone) return Math.round(maxStep * Math.min(1, (pointerX - (right - zone)) / zone));
   return 0;
 }
+
+// ── Colors ─────────────────────────────────────────────────────────────
+
+/**
+ * Black or white text for a solid background, whichever has the higher WCAG contrast.
+ * Accepts `#rgb`, `#rrggbb` and `#rrggbbaa` (alpha ignored); anything else gets white.
+ */
+export function readableOn(background: string): "#000000" | "#ffffff" {
+  const hex = background.trim().replace(/^#/, "");
+  const full = /^[0-9a-f]{3}$/i.test(hex) ? hex.split("").map((c) => c + c).join("") : hex.slice(0, 6);
+  if (!/^[0-9a-f]{6}$/i.test(full)) return "#ffffff";
+  const channel = (i: number) => {
+    const c = parseInt(full.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const lum = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  // Contrast with white: 1.05 / (lum + 0.05); with black: (lum + 0.05) / 0.05.
+  return (lum + 0.05) / 0.05 > 1.05 / (lum + 0.05) ? "#000000" : "#ffffff";
+}
+
+// ── Family offer ───────────────────────────────────────────────────────
+
+/**
+ * What "add the whole family" would add for `agentKey`: its descendants among `all` (depth-first,
+ * parent before children, siblings in `all` order, as `descendantsOf`) minus those already in
+ * `open`. Empty means there is nothing to offer.
+ */
+export function familyOfferChildren<P extends PaneRef>(agentKey: string, all: readonly P[], open: readonly PaneRef[], parentOf: ParentOf): P[] {
+  const present = new Set(open.map((p) => p.key));
+  return descendantsOf(agentKey, all, parentOf).filter((p) => !present.has(p.key));
+}
+
+/**
+ * Adds `members` to `agentKey`'s family block: after the block's last open pane (so panes
+ * already open keep their place and siblings opened earlier stay first), then re-arranged in
+ * family order. Members already open are left where they are. When the family has no open
+ * pane, they go at the end.
+ */
+export function addFamilyMembers<P extends PaneRef>(panes: readonly P[], parentOf: ParentOf, agentKey: string, members: readonly P[]): P[] {
+  const arranged = arrangeByFamily(panes, parentOf);
+  const present = new Set(arranged.map((p) => p.key));
+  const incoming = dedupePanes(members).filter((m) => !present.has(m.key));
+  if (incoming.length === 0) return arranged;
+  const root = rootOf(agentKey, parentOf);
+  let last = -1;
+  arranged.forEach((p, i) => {
+    if (rootOf(p.key, parentOf) === root) last = i;
+  });
+  const at = last < 0 ? arranged.length : last + 1;
+  return arrangeByFamily([...arranged.slice(0, at), ...incoming, ...arranged.slice(at)], parentOf);
+}

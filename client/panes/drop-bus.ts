@@ -54,28 +54,56 @@ function zoneAt(measured: ReadonlyMap<string, Rect>, x: number, y: number): Drop
   return null;
 }
 
+/** How long a zone gets to measure itself before it counts as unmeasurable (null). */
+export const MEASURE_TIMEOUT_MS = 150;
+
+/**
+ * A zone's rect, or null when it throws, rejects, doesn't answer within `timeoutMs` (e.g.
+ * measureInWindow never calls back for a view going away), or has no area (0 wide or tall: a
+ * hidden or stacked screen must not capture drops).
+ */
+export async function measureZone(zone: Pick<DropZone, "measure">, timeoutMs = MEASURE_TIMEOUT_MS): Promise<Rect | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const rect = await Promise.race([
+      zone.measure(),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+    return rect && rect.width > 0 && rect.height > 0 ? rect : null;
+  } catch {
+    return null;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 async function measureAll(): Promise<Map<string, Rect>> {
   const out = new Map<string, Rect>();
   await Promise.all(
     [...zones.values()].map(async (zone) => {
-      try {
-        const rect = await zone.measure();
-        if (rect && rect.width > 0 && rect.height > 0) out.set(zone.id, rect);
-      } catch {
-        // A zone that can't measure itself just can't take the drop.
-      }
+      const rect = await measureZone(zone);
+      if (rect) out.set(zone.id, rect);
     }),
   );
   return out;
 }
 
+/** Bumped by every beginSessionDrag; work started for an older drag must not touch a newer one. */
+let generation = 0;
+
 function refreshRects() {
   if (measuring) return;
   measuring = true;
-  void measureAll().then((next) => {
-    measuring = false;
-    if (current) rects = next;
-  });
+  const gen = generation;
+  void measureAll()
+    .then((next) => {
+      if (current && gen === generation) rects = next;
+    })
+    .finally(() => {
+      measuring = false;
+    });
 }
 
 function setHovered(next: DropZone | null, at?: { x: number; y: number }) {
@@ -101,6 +129,8 @@ export function hasDropZones(): boolean {
 }
 
 export function beginSessionDrag(p: SessionDragPayload): void {
+  generation++;
+  measuring = false;
   current = p;
   rects = new Map();
   hovered = null;
@@ -119,6 +149,7 @@ export function moveSessionDrag(pageX: number, pageY: number): void {
 export async function endSessionDrag(pageX: number | null, pageY: number | null): Promise<boolean> {
   const payload = current;
   if (!payload) return false;
+  const gen = generation;
   let accepted = false;
   if (pageX !== null && pageY !== null) {
     // Measure fresh: the cached rects may be stale or still pending.
@@ -132,6 +163,8 @@ export async function endSessionDrag(pageX: number | null, pageY: number | null)
       }
     }
   }
+  // A new drag began while this one was measuring: leave the new one alone.
+  if (gen !== generation) return accepted;
   setHovered(null);
   current = null;
   rects = new Map();
@@ -179,6 +212,7 @@ export function onOpenInPanes(listener: (p: SessionDragPayload) => void): () => 
 
 /** Test helper: forget every zone, listener and drag. */
 export function resetDropBus(): void {
+  generation++;
   zones.clear();
   rects = new Map();
   current = null;
