@@ -31,9 +31,24 @@ git worktree add -b <type>/<name> ../atrium-<name> origin/main
 - 실사용 Paseo 데몬(`~/.paseo`, 포트 6767)에 개발판을 설치하거나 플러그인을 켜고 끄지 않는다. 마켓플레이스판과 사용량 소스 ID가 같아 동시에 실행할 수 없다.
 - UI와 설치 확인은 격리 데몬과 앱 내장 웹 클라이언트로 한다.
 
+`paseo daemon start`에는 `--port` 옵션이 없다(`--home`, `--timeout`만 있다). 포트는 격리 홈의 `config.json`에 미리 써 둔다.
+
 ```bash
 PASEO=/Applications/Paseo.app/Contents/Resources/bin/paseo
-PASEO_AGENT_ID= $PASEO daemon start --home /private/tmp/<dir> --port <다른 포트>
+DIR=/private/tmp/<dir>; PORT=<다른 포트>
+mkdir -p $DIR
+cat > $DIR/config.json <<JSON
+{"version":1,"daemon":{"listen":"127.0.0.1:$PORT","mcp":{"injectIntoAgents":false},"relay":{"enabled":false}},"pluginsEnabled":true}
+JSON
+env -u PASEO_AGENT_ID -u PASEO_HOME $PASEO daemon start --home $DIR
+```
+
+git 소스 관리 설치 확인과 정리:
+
+```bash
+PASEO_HOME=$DIR $PASEO plugin install git:Mr-DooSun/atrium --ref <branch> --id <test-id> --host 127.0.0.1:$PORT </dev/null
+PASEO_HOME=$DIR $PASEO plugin ls --host 127.0.0.1:$PORT    # running 확인
+$PASEO daemon stop --home $DIR
 ```
 
 ## 4. 머지 전 확인
