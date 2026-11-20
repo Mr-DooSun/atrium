@@ -55,8 +55,7 @@ export function toChatItem({ item, seqStart, timestamp, seqEnd }: TimelineEntry)
     at: timestamp,
     ...(typeof seqEnd === "number" ? { projected: true } : {}),
   };
-  const type = item?.type;
-  switch (type) {
+  switch (item?.type) {
     case "user_message":
       return { ...base, kind: "user", text: stringOrEmpty(item.text) };
     case "assistant_message": {
@@ -107,7 +106,7 @@ export function toChatItem({ item, seqStart, timestamp, seqEnd }: TimelineEntry)
     }
     default:
       // The raw type name is data, shown under a translated "unknown item" label.
-      return { ...base, kind: "other", text: stringOrEmpty(type) || UNKNOWN_FALLBACK_TEXT, code: "unknown" };
+      return { ...base, kind: "other", text: stringOrEmpty(item?.type) || UNKNOWN_FALLBACK_TEXT, code: "unknown" };
   }
 }
 
