@@ -68,6 +68,8 @@ To try a local checkout, install its absolute path on the daemon host:
 paseo plugin install /absolute/path/to/atrium
 ```
 
+Branching, release and review rules are in [RELEASING.md](RELEASING.md).
+
 ## License
 
 [MIT](LICENSE)
