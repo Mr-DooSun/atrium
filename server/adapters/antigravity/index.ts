@@ -2,7 +2,8 @@
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import type { ActionPreview, AuthState, CatalogPlugin, McpAddInput, McpServer } from "../../../shared/toolbox/types";
+import type { ActionPreview, AuthState, CatalogPlugin, McpAddInput, McpServer, PluginSourceInput } from "../../../shared/toolbox/types";
+import { checkGitRemote, checkLocalDir } from "../../core/source";
 import {
   commandResult,
   unsupported,
@@ -89,7 +90,40 @@ function pluginArgs(action: string, pluginId: string, marketplace: string | null
   }
 }
 
+/** agy installs a GitHub URL or a local directory directly; nothing else is documented. */
+async function sourceTarget(source: PluginSourceInput): Promise<{ target: string } | { error: string }> {
+  if (source.ref || source.version || source.path || source.scope) return { error: "agy takes only a repository URL or a directory" };
+  if (source.kind === "git") {
+    const git = checkGitRemote(source.value);
+    if (!git.ok) return { error: git.error };
+    if (git.value.remote.startsWith("git@")) return { error: "agy installs from an https GitHub URL" };
+    const url = git.value.remote.includes("://") ? git.value.remote : `https://github.com/${git.value.remote}`;
+    if (new URL(url).hostname !== "github.com") return { error: "agy installs from GitHub URLs only" };
+    return { target: url };
+  }
+  if (source.kind === "local") {
+    const dir = await checkLocalDir(source.value);
+    return dir.ok ? { target: dir.value } : { error: dir.error };
+  }
+  return { error: `agy cannot install from a ${source.kind} source` };
+}
+
 export const antigravityAdapter: ProviderAdapter = {
+  async previewSource(p, source) {
+    const target = await sourceTarget(source);
+    if ("error" in target) return { command: [], source: null, warnings: [target.error], supported: false };
+    const warnings = source.kind === "git"
+      ? ["Installs third-party code from a GitHub repository at its current default branch (not pinned)."]
+      : ["Installs the directory as it is now."];
+    return { command: argvOf(rt(p), ["plugin", "install", target.target]), source: target.target, warnings, supported: true };
+  },
+
+  async installSource(p, source, cwd) {
+    const target = await sourceTarget(source);
+    if ("error" in target) return commandResult([], "", target.error, false);
+    return this.runAction(p, "install", target.target, null, cwd);
+  },
+
   defaultCommand: "agy",
   // No documented env var relocates ~/.gemini; HOME override is an assumption, so not advertised.
   configHomeEnv: null,

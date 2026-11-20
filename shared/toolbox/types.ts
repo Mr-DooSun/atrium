@@ -79,6 +79,11 @@ export const InstalledPlugin = z.object({
   scope: z.string().nullable().optional(),
   /** Version or revision an update would bring; null/absent = no update known. */
   updateTo: z.string().nullable().optional(),
+  // Store metadata joined from the catalog where cheap (same meaning as on CatalogPlugin).
+  iconUrl: z.string().nullable().optional(),
+  author: z.string().nullable().optional(),
+  homepage: z.string().nullable().optional(),
+  categories: z.array(z.string()).optional(),
 });
 export type InstalledPlugin = z.infer<typeof InstalledPlugin>;
 
@@ -91,6 +96,25 @@ export const CatalogPlugin = z.object({
   source: z.string().nullable(),
   categories: z.array(z.string()),
   installed: z.boolean(),
+  // Store metadata. Optional: absent or null = the ecosystem does not report it.
+  author: z.string().nullable().optional(),
+  /** Latest version the catalog offers. */
+  version: z.string().nullable().optional(),
+  /** Installed version, when installed and reported. */
+  installedVersion: z.string().nullable().optional(),
+  /** Installed and a newer version is offered (same meaning as InstalledPlugin.updateTo). */
+  updateTo: z.string().nullable().optional(),
+  /** https only. */
+  homepage: z.string().nullable().optional(),
+  /** https only; load it as a remote image, never as markup. */
+  iconUrl: z.string().nullable().optional(),
+  license: z.string().nullable().optional(),
+  /** Install count when the source reports one. */
+  installs: z.number().nullable().optional(),
+  /** Highlighted by the registry. */
+  featured: z.boolean().optional(),
+  /** ISO date of the last catalog update for this plugin. */
+  updatedAt: z.string().nullable().optional(),
 });
 export type CatalogPlugin = z.infer<typeof CatalogPlugin>;
 
@@ -98,6 +122,8 @@ export const Marketplace = z.object({
   name: z.string(),
   source: z.string().nullable(),
   pluginCount: z.number().nullable(),
+  /** Built in or official; the UI may hide "remove" for it. */
+  official: z.boolean().optional(),
 });
 export type Marketplace = z.infer<typeof Marketplace>;
 
@@ -143,17 +169,74 @@ export type PluginAction = z.infer<typeof PluginAction>;
 export const MarketplaceAction = z.enum(["add", "remove", "update"]);
 export type MarketplaceAction = z.infer<typeof MarketplaceAction>;
 
+/**
+ * Where a direct install fetches from.
+ * git: https URL, git@host:owner/repo or GitHub owner/repo. npm: package name (optionally "pkg@version").
+ * local: absolute directory on the daemon machine. marketplace: a marketplace source
+ * (owner/repo, https URL or path) plus the plugin name in `plugin`.
+ */
+export const PluginSourceKind = z.enum(["git", "npm", "local", "marketplace"]);
+export type PluginSourceKind = z.infer<typeof PluginSourceKind>;
+
+export const PluginSourceInput = z.object({
+  kind: PluginSourceKind,
+  value: z.string().min(1).max(2048),
+  /** git: branch, tag or commit. A full commit SHA pins the install. */
+  ref: z.string().max(255).nullable().optional(),
+  /** npm: exact version (pinned) or dist-tag. */
+  version: z.string().max(128).nullable().optional(),
+  /** Plugin directory inside the repository or package. */
+  path: z.string().max(512).nullable().optional(),
+  /** Plugin name; required for kind "marketplace". */
+  plugin: z.string().max(128).nullable().optional(),
+  /** Install scope from ECOSYSTEM_CAPS[eco].scopes; null = the CLI default. */
+  scope: z.string().nullable().optional(),
+});
+export type PluginSourceInput = z.infer<typeof PluginSourceInput>;
+
+/** Catalog orderings; plugins without the sort key come last, then by name. */
+export const CatalogSort = z.enum(["name", "installs", "updated"]);
+export type CatalogSort = z.infer<typeof CatalogSort>;
+
 /** What each ecosystem can do, so the UI hides buttons that would only fail. */
 export const ECOSYSTEM_CAPS: Record<
   Ecosystem,
-  { plugin: readonly PluginAction[]; marketplace: readonly MarketplaceAction[]; browse: boolean }
+  {
+    plugin: readonly PluginAction[];
+    marketplace: readonly MarketplaceAction[];
+    browse: boolean;
+    /** Direct-install sources (previewSourceInstall / runSourceInstall). */
+    sources: readonly PluginSourceKind[];
+    /** Scopes a plugin action may target; the first is the default. Empty: no choice, send null. */
+    scopes: readonly string[];
+    /** Catalog sorts the source can back with data; the first is the default. */
+    sorts: readonly CatalogSort[];
+  }
 > = {
-  paseo: { plugin: ["install", "uninstall", "enable", "disable", "update"], marketplace: [], browse: true },
+  paseo: {
+    plugin: ["install", "uninstall", "enable", "disable", "update"],
+    marketplace: [],
+    browse: true,
+    sources: ["git", "npm", "local"],
+    scopes: [],
+    sorts: ["name", "installs", "updated"],
+  },
   claude: {
     plugin: ["install", "uninstall", "enable", "disable", "update"],
     marketplace: ["add", "remove", "update"],
     browse: true,
+    sources: ["marketplace"],
+    scopes: ["user", "project", "local"],
+    sorts: ["name", "installs"],
   },
-  codex: { plugin: ["install", "uninstall"], marketplace: ["add", "remove", "update"], browse: true },
-  antigravity: { plugin: ["install", "uninstall", "enable", "disable"], marketplace: [], browse: false },
+  codex: { plugin: ["install", "uninstall"], marketplace: ["add", "remove", "update"], browse: true, sources: [], scopes: [], sorts: ["name"] },
+  antigravity: {
+    plugin: ["install", "uninstall", "enable", "disable"],
+    marketplace: [],
+    browse: false,
+    sources: ["git", "local"],
+    scopes: [],
+    sorts: ["name"],
+  },
 };
+

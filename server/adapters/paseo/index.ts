@@ -1,11 +1,12 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import type { ActionPreview, InstalledPlugin, PluginAction } from "../../../shared/toolbox/types.ts";
+import type { ActionPreview, CatalogPlugin, InstalledPlugin, PluginAction, PluginSourceInput } from "../../../shared/toolbox/types.ts";
 import { PASEO_PLUGIN_TRUST_WARNING } from "../../../shared/toolbox/warnings.ts";
 import { commandResult, unsupported, type PluginEcosystemAdapter } from "../../core/adapter.ts";
 import { failure, plain, run } from "../../core/exec.ts";
 import { paseoHomeArgs, resolvePaseoCommand } from "../../core/paseo-bin.ts";
+import { checkGitRef, checkGitRemote, checkLocalDir, checkNpm, checkSubPath, safeHttpsUrl } from "../../core/source.ts";
 
 const registryUrl = new URL("https://plugins.paseo.sh");
 const registryIndex = new URL("/index.json", registryUrl).href;
@@ -28,6 +29,12 @@ const registryEntry = z.object({
     z.object({ kind: z.literal("npm"), package: z.string(), version: z.string().optional(), pluginPath: z.string().optional() }),
   ]),
   translations: z.record(z.string(), z.object({ name: z.string().optional(), description: z.string().optional() })).optional(),
+  // Store metadata; loose so a registry schema change never empties the catalog.
+  author: z.object({ github: z.string().optional(), name: z.string().optional() }).passthrough().nullish().catch(null),
+  icon: z.string().nullish().catch(null),
+  installs: z.number().nullish().catch(null),
+  license: z.string().nullish().catch(null),
+  updatedAt: z.string().nullish().catch(null),
 });
 
 const installedEntry = z.object({
@@ -57,6 +64,7 @@ type InstalledEntry = z.infer<typeof installedEntry>;
 
 let registryCache: { expiresAt: number; plugins: RegistryEntry[] } | undefined;
 let registryFetch: Promise<RegistryEntry[]> | undefined;
+let featured = new Set<string>();
 
 async function fetchRegistry(): Promise<RegistryEntry[]> {
   const controller = new AbortController();
@@ -65,7 +73,12 @@ async function fetchRegistry(): Promise<RegistryEntry[]> {
     const response = await fetch(registryIndex, { signal: controller.signal });
     if (!response.ok) throw new Error(`Paseo registry returned HTTP ${response.status}.`);
     try {
-      return z.object({ plugins: z.array(registryEntry) }).parse(await response.json()).plugins;
+      const index = z.object({
+        plugins: z.array(registryEntry),
+        featured: z.array(z.string()).optional().catch(undefined),
+      }).parse(await response.json());
+      featured = new Set(index.featured ?? []);
+      return index.plugins;
     } catch {
       throw new Error("Paseo registry returned an invalid catalog.");
     }
@@ -109,9 +122,21 @@ function repositoryKey(remote: string): string {
     .replace(/\/$/, "").replace(/\.git$/, "");
 }
 
-function isInstalled(entry: RegistryEntry, plugins: InstalledEntry[]): boolean {
+function authorOf(entry: RegistryEntry): string | null {
+  const name = entry.author?.name ?? entry.author?.github;
+  return typeof name === "string" && name.trim() ? name.trim().slice(0, 100) : null;
+}
+
+function installedVersionOf(entry: InstalledEntry): string | null {
+  if (entry.version) return entry.version;
+  const revision = entry.installation?.currentRevision;
+  if (!revision) return null;
+  return entry.installation?.identity.kind === "npm" ? revision : revision.slice(0, 7);
+}
+
+function installedMatch(entry: RegistryEntry, plugins: InstalledEntry[]): InstalledEntry | undefined {
   const artifact = entry.artifact;
-  return plugins.some((installed) => {
+  return plugins.find((installed) => {
     const identity = installed.installation?.identity;
     if (identity?.registry) {
       // An identically named entry from a self-hosted registry may be a different artifact.
@@ -284,6 +309,102 @@ async function previewPinnedPlan(action: "install" | "update", id: string, marke
   return pending;
 }
 
+// ---- Direct installs (git, npm, local directory) ----------------------------------------------
+// The preview resolves a moving ref or dist-tag to one commit or version and the run installs
+// exactly that, so what the user confirmed is what lands.
+
+const UNPINNED_LOCAL = "Installs the directory as it is now; later edits there run as-is on the next reload.";
+
+async function resolveGitCommit(remote: string, ref: string | null): Promise<string> {
+  if (ref && gitCommit.test(ref)) return ref.toLowerCase();
+  const patterns = ref ? [ref, `refs/tags/${ref}^{}`] : ["HEAD"];
+  const result = await run("git", ["ls-remote", "--", remote, ...patterns], {
+    timeoutMs: 20_000,
+    env: { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "" },
+  });
+  const error = failure(result);
+  if (error) throw new Error(`Could not read the Git repository: ${redact(error).slice(0, 300)}`);
+  const rows = result.stdout.trim().split("\n").map((line) => line.split("\t")).filter((row) => row.length === 2);
+  // An annotated tag lists the tag object and, with ^{}, the commit it points at.
+  const peeled = rows.find(([, name]) => name.endsWith("^{}"));
+  const exact = rows.find(([, name]) => !ref || name === ref || name === `refs/heads/${ref}` || name === `refs/tags/${ref}`);
+  const sha = (peeled ?? exact ?? rows[0])?.[0];
+  if (!sha || !gitCommit.test(sha)) throw new Error(ref ? `Git ref "${ref}" was not found.` : "The Git repository has no default branch.");
+  return sha.toLowerCase();
+}
+
+async function resolveNpmVersion(name: string, tag: string | null): Promise<string> {
+  if (tag && npmVersion.test(tag)) return tag;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const url = `https://registry.npmjs.org/${name.replace("/", "%2F")}/${encodeURIComponent(tag ?? "latest")}`;
+    const response = await fetch(url, { signal: controller.signal, headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(response.status === 404 ? `npm package ${name}@${tag ?? "latest"} was not found.` : `npm registry returned HTTP ${response.status}.`);
+    const version = z.object({ version: z.string() }).parse(await response.json()).version;
+    if (!npmVersion.test(version)) throw new Error("npm registry returned an invalid version.");
+    return version;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveSourcePlan(source: PluginSourceInput, home: readonly string[]): Promise<PinnedPlan> {
+  const command = await resolvePaseoCommand();
+  const expiresAt = Date.now() + registryTtlMs;
+  const path = checkSubPath(source.path);
+  if (!path.ok) throw new Error(path.error);
+  const pathArgs = path.value ? ["--path", path.value] : [];
+  const pathNote = path.value ? ` (${path.value})` : "";
+  if (source.kind === "git") {
+    const git = checkGitRemote(source.value);
+    if (!git.ok) throw new Error(git.error);
+    if (git.value.remote.startsWith("git@")) throw new Error("Use an https Git URL or owner/repo for Paseo plugins.");
+    const ref = checkGitRef(source.ref);
+    if (!ref.ok) throw new Error(ref.error);
+    const remote = git.value.remote.includes("://") ? git.value.remote : `https://github.com/${git.value.remote}`;
+    const commit = await resolveGitCommit(remote, ref.value);
+    // Same pinning as registry installs: the peel expression is only valid as a revision.
+    const args = ["plugin", "add", `git:${remote}`, "--ref", `${commit}^{commit}`, ...pathArgs, "--json", ...home];
+    const via = ref.value && ref.value.toLowerCase() !== commit ? ` (${ref.value})` : "";
+    return { command, args, source: redact(`${git.value.display}${pathNote} @ ${commit}${via}`), expiresAt };
+  }
+  if (source.kind === "npm") {
+    const npm = checkNpm(source.value, source.version);
+    if (!npm.ok) throw new Error(npm.error);
+    const version = await resolveNpmVersion(npm.value.name, npm.value.version);
+    const args = ["plugin", "add", `npm:${npm.value.name}@${version}`, ...pathArgs, "--json", ...home];
+    return { command, args, source: `npm:${npm.value.name}@${version}${pathNote}`, expiresAt };
+  }
+  if (source.kind === "local") {
+    const dir = await checkLocalDir(source.value);
+    if (!dir.ok) throw new Error(dir.error);
+    if (path.value) throw new Error("Pick the plugin directory itself instead of a sub-path.");
+    return { command, args: ["plugin", "add", dir.value, "--json", ...home], source: dir.value, expiresAt };
+  }
+  throw new Error(`Paseo plugins cannot be installed from a ${source.kind} source.`);
+}
+
+function sourceKey(source: PluginSourceInput, home: readonly string[]) {
+  const { kind, value, ref, version, path, plugin, scope } = source;
+  return JSON.stringify(["source", kind, value.trim(), ref ?? null, version ?? null, path ?? null, plugin ?? null, scope ?? null, home]);
+}
+
+async function previewSourcePlan(source: PluginSourceInput, home: readonly string[]) {
+  const key = sourceKey(source, home);
+  const active = activePinnedPlan(key);
+  if (active) return active;
+  let pending = pendingPlans.get(key);
+  if (!pending) {
+    pending = resolveSourcePlan(source, home).then((plan) => {
+      pinnedPlans.set(key, plan);
+      return plan;
+    }).finally(() => { pendingPlans.delete(key); });
+    pendingPlans.set(key, pending);
+  }
+  return pending;
+}
+
 function unavailablePreview(error: string): ActionPreview {
   return { command: [], source: null, warnings: [error], supported: false };
 }
@@ -323,8 +444,19 @@ export const paseoPluginsAdapter: PluginEcosystemAdapter = {
   },
 
   async listInstalled(): Promise<InstalledPlugin[]> {
-    const entries = await installedFromCli(await resolvePaseoCommand(), paseoHomeArgs());
+    const [entries, registry] = await Promise.all([
+      installedFromCli(await resolvePaseoCommand(), paseoHomeArgs()),
+      // Store metadata only: an unreachable registry must not hide installed plugins.
+      getRegistry().catch(() => [] as RegistryEntry[]),
+    ]);
+    const metaFor = (entry: InstalledEntry) => {
+      const reg = registry.find((r) => installedMatch(r, [entry]));
+      return reg ? {
+        iconUrl: safeHttpsUrl(reg.icon), author: authorOf(reg), homepage: safeHttpsUrl(reg.repository?.url), categories: reg.categories,
+      } : {};
+    };
     return entries.map((entry) => ({
+      ...metaFor(entry),
       id: entry.id,
       name: entry.name ?? entry.id,
       version: entry.version ?? (entry.installation?.identity.kind === "npm" ? entry.installation.currentRevision ?? null : null),
@@ -347,17 +479,28 @@ export const paseoPluginsAdapter: PluginEcosystemAdapter = {
       const { name, description } = localizedText(entry);
       const searchable = [entry.id, entry.name, entry.description, name, description, ...entry.categories];
       if (!searchable.some((value) => value?.toLowerCase().includes(search))) return [];
-      return [{
+      const match = installedMatch(entry, installed);
+      const plugin: CatalogPlugin = {
         id: entry.id,
         name,
         description,
         marketplace: registryName,
         source: catalogSource(entry),
         categories: entry.categories,
-        installed: isInstalled(entry, installed),
-      }];
+        installed: !!match,
+        author: authorOf(entry),
+        version: entry.artifact.kind === "npm" ? entry.artifact.version ?? null : entry.artifact.commit?.slice(0, 7) ?? null,
+        installedVersion: match ? installedVersionOf(match) : null,
+        homepage: safeHttpsUrl(entry.repository?.url),
+        iconUrl: safeHttpsUrl(entry.icon),
+        license: entry.license ?? null,
+        installs: entry.installs ?? null,
+        featured: featured.has(entry.id),
+        updatedAt: entry.updatedAt ?? null,
+      };
+      return [plugin];
     });
-    return { plugins, marketplaces: [{ name: registryName, source: registryIndex, pluginCount: registry.length }] };
+    return { plugins, marketplaces: [{ name: registryName, source: registryIndex, pluginCount: registry.length, official: true }] };
   },
 
   async previewAction(_profile, action, pluginId, marketplace, cwd) {
@@ -425,6 +568,31 @@ export const paseoPluginsAdapter: PluginEcosystemAdapter = {
       error ? redact(error) : null,
       false,
     );
+  },
+
+  async previewSource(_profile, source) {
+    const home = paseoHomeArgs();
+    try {
+      const plan = await previewSourcePlan(source, home);
+      const warnings = source.kind === "local" ? [UNPINNED_LOCAL, PASEO_PLUGIN_TRUST_WARNING]
+        : ["Not reviewed by the Paseo registry: only install code you trust.", PASEO_PLUGIN_TRUST_WARNING];
+      return { command: [plan.command, ...plan.args], relativeHome: relativeHomeForDisplay(home), source: plan.source, warnings, supported: true };
+    } catch (error) {
+      return unavailablePreview(redact(error instanceof Error ? error.message : String(error)));
+    }
+  },
+
+  async installSource(_profile, source) {
+    updateCache = null;
+    const home = paseoHomeArgs();
+    const key = sourceKey(source, home);
+    const plan = activePinnedPlan(key);
+    if (!plan) return commandResult([], "", "Open a new preview and confirm its pinned revision before proceeding.", false);
+    // One confirmation, one install.
+    pinnedPlans.delete(key);
+    const result = await run(plan.command, plan.args, { timeoutMs: 180_000 });
+    const error = failure(result);
+    return commandResult([plan.command, ...plan.args], error ? "" : `Paseo installed ${plan.source}.`, error ? redact(error) : null, false);
   },
 
   async runMarketplaceAction() {

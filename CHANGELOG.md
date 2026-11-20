@@ -7,9 +7,24 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+### Added
+
+- Plugin icon (`assets/icon.png`) and a store banner (`assets/hero-dark-1600.jpg`). The manifest now sets `icon` and puts the banner first in `media`.
+- Plugin store redesign in `/plugins`: cards with icons (initials when a plugin has none), search, category chips, sort options per ecosystem, a Featured badge, and a detail sheet with version, installs, license, scope, source and homepage.
+- Clear install states on cards and in the detail sheet: installing, updating, removing, enabling and disabling with a spinner; installed; update available; and failures with Retry and Dismiss. A running action can continue in the background.
+- Installed tab filters (All, Updates, Errors, Enabled, Disabled with counts) and a "Needs attention" sort.
+- Install from source: Paseo plugins from a git repository (`owner/repo` or https URL, with an optional branch, tag, commit and subfolder), an npm package or a local folder. Antigravity plugins from a GitHub https URL or a local folder. Claude Code plugins from a marketplace that has not been added yet.
+- Install scopes (user, project, local) for Claude Code plugins.
+- Previews before adding, removing or updating a marketplace.
+- Catalog metadata: author, version, installs, license, featured, updated date, categories and update availability.
+
 ### Changed
 
 - A pane whose live updates stopped (daemon restart, lost connection) now reconnects by itself shortly after its host is back online, instead of waiting for the retry button. If that retry fails too, the button stays until the next reconnect.
+- A source install is pinned at preview time (git refs to a commit, npm tags to an exact version) and runs only with that single-use preview, within 10 minutes, so it installs exactly what was shown.
+- Claude Code marketplace sources must be `owner/repo`, an https or `git@` URL, or an absolute path. Relative paths such as `./foo` are now rejected.
+- Commands and errors shown in the app no longer include credentials, query strings or fragments from URLs.
+- More natural wording in every toolbox language, including French typography (no-break spaces before `:`, `;`, `?` and `!`) and consistent terms in Russian and Japanese.
 
 ### Fixed
 
@@ -21,6 +36,7 @@ features or behavior changes go in a minor release (0.2.0).
 - A closed pane's width came back when the same session was reopened before a restart. Sessions whose parent links form a loop could disappear from the panes screen.
 - Worktree badges disappeared with git older than 2.36.
 - With more than one host connected, a remote session could show the worktree badge of a local folder with the same path. Badges are now looked up per host, and are not shown when the plugin cannot tell which host it runs on.
+- The Claude Code installed list showed project and local installs from every project on the machine, often many times over. It now shows user-wide installs, plus the project and local installs of the open project, and the catalog marks a plugin installed only on that basis.
 
 ## [0.2.1] - 2026-11-21
 

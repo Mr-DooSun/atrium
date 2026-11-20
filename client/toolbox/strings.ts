@@ -26,15 +26,26 @@ export function useToolboxText(): Strings {
 
 export function useToolboxStrings() {
   const { t, locale } = useTranslation(toolboxText);
-  return useMemo(() => toolboxStrings(t, new Intl.NumberFormat(locale)), [t, locale]);
+  return useMemo(
+    () =>
+      toolboxStrings(t, new Intl.NumberFormat(locale), new Intl.NumberFormat(locale, { notation: "compact" }), new Intl.DateTimeFormat(locale, { dateStyle: "medium" })),
+    [t, locale],
+  );
 }
 
 export type Strings = ReturnType<typeof toolboxStrings>;
 type Translate = ReturnType<typeof useTranslation<typeof en>>["t"];
 
-function toolboxStrings(t: Translate, numbers: Intl.NumberFormat) {
+function toolboxStrings(t: Translate, numbers: Intl.NumberFormat, compact: Intl.NumberFormat, dates: Intl.DateTimeFormat) {
   return {
     diagnostic: (text: string) => localizeDiagnostic(t, text),
+    /** A count in the locale's short form (1.2K, 1.2천). */
+    count: (n: number) => compact.format(n),
+    /** An ISO date in the user's locale; the raw text when it does not parse. */
+    date: (iso: string) => {
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? iso : dates.format(d);
+    },
     back: {
       label: t("back.label"),
       toChat: (title: string) => t("back.toChat", { title }),
@@ -203,7 +214,104 @@ function toolboxStrings(t: Translate, numbers: Intl.NumberFormat) {
         marketplaceRemove: t("plugins.titles.marketplaceRemove"),
         marketplaceUpdate: t("plugins.titles.marketplaceUpdate"),
       },
-      catalogShown: (shown: number, total: number) => t("plugins.catalogShown", { shown: numbers.format(shown), total: numbers.format(total) }),
+      catalogCount: (shown: number, total: number) => t("plugins.catalogCount", { shown: numbers.format(shown), total: numbers.format(total) }),
+      searchInstalled: t("plugins.searchInstalled"),
+      featured: t("plugins.featured"),
+      official: t("plugins.official"),
+      installScope: t("plugins.installScope"),
+      scopeNeedsProject: t("plugins.scopeNeedsProject"),
+      source: {
+        button: t("plugins.source.button"),
+        title: t("plugins.source.title"),
+        kind: t("plugins.source.kind"),
+        kinds: {
+          git: t("plugins.source.kinds.git"),
+          npm: t("plugins.source.kinds.npm"),
+          local: t("plugins.source.kinds.local"),
+          marketplace: t("plugins.source.kinds.marketplace"),
+        },
+        valueLabel: {
+          git: t("plugins.source.valueLabel.git"),
+          npm: t("plugins.source.valueLabel.npm"),
+          local: t("plugins.source.valueLabel.local"),
+          marketplace: t("plugins.source.valueLabel.marketplace"),
+        },
+        valuePlaceholder: {
+          git: t("plugins.source.valuePlaceholder.git"),
+          npm: t("plugins.source.valuePlaceholder.npm"),
+          local: t("plugins.source.valuePlaceholder.local"),
+          marketplace: t("plugins.source.valuePlaceholder.marketplace"),
+        },
+        invalidValue: {
+          git: t("plugins.source.invalidValue.git"),
+          npm: t("plugins.source.invalidValue.npm"),
+          local: t("plugins.source.invalidValue.local"),
+          marketplace: t("plugins.source.invalidValue.marketplace"),
+        },
+        plugin: t("plugins.source.plugin"),
+        pluginPlaceholder: t("plugins.source.pluginPlaceholder"),
+        ref: t("plugins.source.ref"),
+        refPlaceholder: t("plugins.source.refPlaceholder"),
+        refNote: t("plugins.source.refNote"),
+        version: t("plugins.source.version"),
+        versionPlaceholder: t("plugins.source.versionPlaceholder"),
+        path: t("plugins.source.path"),
+        pathPlaceholder: t("plugins.source.pathPlaceholder"),
+        review: t("plugins.source.review"),
+      },
+      installs: (n: number) => t("plugins.installs", { n: compact.format(n) }),
+      clearSearch: t("plugins.clearSearch"),
+      clearFilters: t("plugins.clearFilters"),
+      filterEmpty: t("plugins.filterEmpty"),
+      updateTo: (version: string) => t("plugins.updateTo", { version }),
+      filters: {
+        all: t("plugins.filters.all"),
+        updates: t("plugins.filters.updates"),
+        errors: t("plugins.filters.errors"),
+        enabled: t("plugins.filters.enabled"),
+        disabled: t("plugins.filters.disabled"),
+      },
+      sort: {
+        name: t("plugins.sort.name"),
+        attention: t("plugins.sort.attention"),
+        updated: t("plugins.sort.updated"),
+        installs: t("plugins.sort.installs"),
+      },
+      state: {
+        dismiss: t("plugins.state.dismiss"),
+        running: {
+          install: t("plugins.state.running.install"),
+          update: t("plugins.state.running.update"),
+          remove: t("plugins.state.running.remove"),
+          enable: t("plugins.state.running.enable"),
+          disable: t("plugins.state.running.disable"),
+        },
+        failed: {
+          install: t("plugins.state.failed.install"),
+          update: t("plugins.state.failed.update"),
+          remove: t("plugins.state.failed.remove"),
+          enable: t("plugins.state.failed.enable"),
+          disable: t("plugins.state.failed.disable"),
+        },
+      },
+      detail: {
+        title: t("plugins.detail.title"),
+        open: t("plugins.detail.open"),
+        noDescription: t("plugins.detail.noDescription"),
+        by: (author: string) => t("plugins.detail.by", { author }),
+        author: t("plugins.detail.author"),
+        version: t("plugins.detail.version"),
+        installedVersion: t("plugins.detail.installedVersion"),
+        latestVersion: t("plugins.detail.latestVersion"),
+        updateTo: t("plugins.detail.updateTo"),
+        scope: t("plugins.detail.scope"),
+        marketplace: t("plugins.detail.marketplace"),
+        source: t("plugins.detail.source"),
+        homepage: t("plugins.detail.homepage"),
+        installs: t("plugins.detail.installs"),
+        updated: t("plugins.detail.updated"),
+        license: t("plugins.detail.license"),
+      },
       loadMore: (n: number) => t("plugins.loadMore", { n }),
       antigravityBrowseNote: t("plugins.antigravityBrowseNote"),
       marketplaceAddWarning: t("plugins.marketplaceAddWarning"),
@@ -249,6 +357,8 @@ function toolboxStrings(t: Translate, numbers: Intl.NumberFormat) {
       summary: (ok: number, failed: number, skipped: number) =>
         skipped > 0 ? t("flow.summarySkipped", { ok, failed, skipped }) : t("flow.summary", { ok, failed }),
       reloadFor: (label: string) => t("flow.reloadFor", { label }),
+      background: t("flow.background"),
+      doneToast: (subject: string) => t("flow.doneToast", { subject }),
     },
   };
 }

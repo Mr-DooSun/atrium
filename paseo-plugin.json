@@ -2,7 +2,9 @@
   "id": "atrium",
   "name": "Atrium",
   "description": "Nested agent tree sidebar with worktree badges, many chats side by side in panes, usage and token monitor for additional Claude and Codex accounts, and an MCP and plugin toolbox.",
+  "icon": "assets/icon.png",
   "media": [
+    "assets/hero-dark-1600.jpg",
     "assets/screenshot-sidebar.png",
     "assets/screenshot-panes.png",
     "assets/screenshot-worktrees.png",

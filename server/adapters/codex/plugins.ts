@@ -111,6 +111,7 @@ export const codexPlugins: PluginEcosystemAdapter = {
     ]);
     catalogCache.set(key, { at: hit?.listing === listing ? hit.at : Date.now(), listing });
     const installed = new Set(listing.installed.map(({ pluginId }) => pluginId));
+    const installedVersions = new Map(listing.installed.map((entry) => [entry.pluginId, entry.version ?? null]));
     const entries = new Map([...listing.installed, ...(listing.available ?? [])].map((entry) => [entry.pluginId, entry]));
     const marketplaces = new Map(marketplaceListing.marketplaces.map((entry) => [entry.name, {
       name: entry.name,
@@ -134,6 +135,8 @@ export const codexPlugins: PluginEcosystemAdapter = {
         source: pluginSource(entry),
         categories: [],
         installed: installed.has(entry.pluginId),
+        version: entry.version ?? null,
+        installedVersion: installed.has(entry.pluginId) ? installedVersions.get(entry.pluginId) ?? null : null,
       });
     }
     return { plugins, marketplaces: [...marketplaces.values()] };
@@ -155,6 +158,21 @@ export const codexPlugins: PluginEcosystemAdapter = {
     const { args, error } = planAction(action, pluginId, marketplace);
     if (error) return commandResult([], "", error, false);
     return change(runtime, args, argvOf(runtime, args), `plugin ${action}`, cwd);
+  },
+
+  async previewMarketplaceAction(profile, action, source) {
+    const runtime = requireProfile(profile);
+    if (!source.trim() || source.startsWith("-") || /[\u0000-\u001f]/.test(source)) {
+      return { command: [], source: null, warnings: ["This marketplace source or name is invalid."], supported: false };
+    }
+    const shownSource = displaySource(source) ?? "<redacted>";
+    const verb = action === "update" ? "upgrade" : action;
+    return {
+      command: argvOf(runtime, ["plugin", "marketplace", verb, shownSource, "--json"]),
+      source: action === "add" ? shownSource : null,
+      warnings: action === "add" ? ["Plugins from this marketplace are third-party code: add only sources you trust."] : [],
+      supported: true,
+    };
   },
 
   async runMarketplaceAction(profile, action, source, cwd?: string | null) {

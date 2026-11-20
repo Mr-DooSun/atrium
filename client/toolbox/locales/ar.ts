@@ -181,7 +181,104 @@ export default {
       marketplaceRemove: "إزالة السوق",
       marketplaceUpdate: "تحديث السوق"
     },
-    catalogShown: "عرض {{shown}} من {{total}} · حسب الاسم",
+    catalogCount: "عرض {{shown}} من {{total}}",
+    searchInstalled: "البحث في الإضافات المثبتة",
+    featured: "مميزة",
+    official: "رسمية",
+    installScope: "التثبيت في",
+    scopeNeedsProject: "تتطلب نطاقات المشروع وجود مشروع. افتح ‎/plugins من أحد الوكلاء لاستخدامها.",
+    source: {
+      button: "التثبيت من مصدر",
+      title: "التثبيت من مصدر",
+      kind: "المصدر",
+      kinds: {
+        git: "Git",
+        npm: "npm",
+        local: "مجلد محلي",
+        marketplace: "سوق"
+      },
+      valueLabel: {
+        git: "المستودع",
+        npm: "الحزمة",
+        local: "مسار المجلد",
+        marketplace: "مصدر السوق"
+      },
+      valuePlaceholder: {
+        git: "owner/repo أو https://…",
+        npm: "@scope/package",
+        local: "/absolute/path/to/plugin",
+        marketplace: "owner/repo أو عنوان URL أو مسار"
+      },
+      invalidValue: {
+        git: "أدخل مستودعًا بدون مسافات",
+        npm: "أدخل اسم حزمة npm صالحًا",
+        local: "أدخل مسارًا مطلقًا",
+        marketplace: "أدخل مصدر سوق بدون مسافات"
+      },
+      plugin: "اسم الإضافة",
+      pluginPlaceholder: "my-plugin",
+      ref: "فرع أو وسم أو commit (اختياري)",
+      refPlaceholder: "main",
+      refNote: "يؤدي إدخال معرّف commit الكامل (SHA) إلى تثبيت الإضافة على هذه المراجعة.",
+      version: "الإصدار أو الوسم (اختياري)",
+      versionPlaceholder: "latest",
+      path: "مجلد الإضافة داخل المصدر (اختياري)",
+      pathPlaceholder: "plugins/my-plugin",
+      review: "مراجعة الأمر"
+    },
+    installs: "عدد مرات التثبيت: {{n}}",
+    clearSearch: "مسح البحث",
+    clearFilters: "مسح البحث وعوامل التصفية",
+    filterEmpty: "لا توجد إضافات تطابق البحث وعوامل التصفية",
+    updateTo: "التحديث إلى {{version}}",
+    filters: {
+      all: "الكل",
+      updates: "التحديثات",
+      errors: "الأخطاء",
+      enabled: "المفعّلة",
+      disabled: "المعطّلة"
+    },
+    sort: {
+      name: "الاسم",
+      attention: "تحتاج إلى انتباه",
+      updated: "الأحدث تحديثًا",
+      installs: "الأكثر تثبيتًا"
+    },
+    state: {
+      dismiss: "تجاهل",
+      running: {
+        install: "جارٍ التثبيت…",
+        update: "جارٍ التحديث…",
+        remove: "جارٍ الإزالة…",
+        enable: "جارٍ التفعيل…",
+        disable: "جارٍ التعطيل…"
+      },
+      failed: {
+        install: "فشل التثبيت",
+        update: "فشل التحديث",
+        remove: "فشل إلغاء التثبيت",
+        enable: "فشل التفعيل",
+        disable: "فشل التعطيل"
+      }
+    },
+    detail: {
+      title: "تفاصيل الإضافة",
+      open: "عرض التفاصيل",
+      noDescription: "لا يوجد وصف",
+      by: "بواسطة {{author}}",
+      author: "المطوّر",
+      version: "الإصدار",
+      installedVersion: "المثبّت",
+      latestVersion: "الأحدث",
+      updateTo: "التحديث إلى",
+      scope: "النطاق",
+      marketplace: "السوق",
+      source: "المصدر",
+      homepage: "فتح الصفحة الرئيسية",
+      installs: "مرات التثبيت",
+      updated: "آخر تحديث",
+      license: "الترخيص"
+    },
     loadMore: "عرض المزيد ({{n}})",
     antigravityBrowseNote: "تصفّح سوق Antigravity عبر ‎/plugin في agy. تعرض القائمة العناصر التي عثرت عليها الأدوات.",
     marketplaceAddWarning: "يجلب قائمة الإضافات من هذا المصدر.",
@@ -226,7 +323,9 @@ export default {
     nowRunning: "قيد التشغيل",
     summary: "نجح: {{ok}}",
     summarySkipped: "نجح: {{ok}} · فشل: {{failed}} · تم التخطي: {{skipped}}",
-    reloadFor: "{{label}}: أعد تحميل الجلسات المفتوحة لتطبيق التغييرات."
+    reloadFor: "{{label}}: أعد تحميل الجلسات المفتوحة لتطبيق التغييرات.",
+    background: "المتابعة في الخلفية",
+    doneToast: "{{subject}}: اكتمل"
   },
   diagnostic: {
     agyUpdate: "لا يوجد أمر موثّق لتحديث الإضافات في agy.",

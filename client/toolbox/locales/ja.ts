@@ -181,7 +181,104 @@ export default {
       marketplaceRemove: "マーケットプレイスを削除",
       marketplaceUpdate: "マーケットプレイスを更新"
     },
-    catalogShown: "{{total}} 件中 {{shown}} 件を表示 · 名前順",
+    catalogCount: "{{total}} 件中 {{shown}} 件を表示",
+    searchInstalled: "インストール済みのプラグインを検索",
+    featured: "おすすめ",
+    official: "公式",
+    installScope: "インストール先",
+    scopeNeedsProject: "プロジェクトスコープを使うにはプロジェクトが必要です。エージェントから /plugins を開いてください。",
+    source: {
+      button: "ソースからインストール",
+      title: "ソースからインストール",
+      kind: "ソース",
+      kinds: {
+        git: "Git",
+        npm: "npm",
+        local: "ローカルフォルダー",
+        marketplace: "マーケットプレイス"
+      },
+      valueLabel: {
+        git: "リポジトリ",
+        npm: "パッケージ",
+        local: "フォルダーのパス",
+        marketplace: "マーケットプレイスのソース"
+      },
+      valuePlaceholder: {
+        git: "owner/repo または https://…",
+        npm: "@scope/package",
+        local: "/absolute/path/to/plugin",
+        marketplace: "owner/repo、URL、またはパス"
+      },
+      invalidValue: {
+        git: "スペースを含まないリポジトリを入力してください",
+        npm: "有効な npm パッケージ名を入力してください",
+        local: "絶対パスを入力してください",
+        marketplace: "スペースを含まないマーケットプレイスのソースを入力してください"
+      },
+      plugin: "プラグイン名",
+      pluginPlaceholder: "my-plugin",
+      ref: "ブランチ、タグ、またはコミット（任意）",
+      refPlaceholder: "main",
+      refNote: "完全なコミット SHA を指定すると、そのリビジョンに固定してインストールします。",
+      version: "バージョンまたはタグ（任意）",
+      versionPlaceholder: "latest",
+      path: "ソース内のプラグインフォルダー（任意）",
+      pathPlaceholder: "plugins/my-plugin",
+      review: "コマンドを確認"
+    },
+    installs: "インストール数: {{n}}",
+    clearSearch: "検索をクリア",
+    clearFilters: "検索とフィルターをクリア",
+    filterEmpty: "検索とフィルターに一致するプラグインはありません",
+    updateTo: "{{version}} に更新",
+    filters: {
+      all: "すべて",
+      updates: "更新あり",
+      errors: "エラー",
+      enabled: "有効",
+      disabled: "無効"
+    },
+    sort: {
+      name: "名前順",
+      attention: "要確認",
+      updated: "更新が新しい順",
+      installs: "インストール数順"
+    },
+    state: {
+      dismiss: "閉じる",
+      running: {
+        install: "インストール中…",
+        update: "更新中…",
+        remove: "削除中…",
+        enable: "有効にしています…",
+        disable: "無効にしています…"
+      },
+      failed: {
+        install: "インストールに失敗しました",
+        update: "更新に失敗しました",
+        remove: "アンインストールに失敗しました",
+        enable: "有効にできませんでした",
+        disable: "無効にできませんでした"
+      }
+    },
+    detail: {
+      title: "プラグインの詳細",
+      open: "詳細を表示",
+      noDescription: "説明なし",
+      by: "作成者: {{author}}",
+      author: "作成者",
+      version: "バージョン",
+      installedVersion: "インストール済み",
+      latestVersion: "最新",
+      updateTo: "更新後のバージョン",
+      scope: "スコープ",
+      marketplace: "マーケットプレイス",
+      source: "ソース",
+      homepage: "ホームページを開く",
+      installs: "インストール数",
+      updated: "更新日",
+      license: "ライセンス"
+    },
     loadMore: "さらに {{n}} 件表示",
     antigravityBrowseNote: "Antigravity のマーケットプレイスは agy の /plugin で閲覧できます。ここにはツールボックスで確認した項目を表示します。",
     marketplaceAddWarning: "このソースからプラグイン一覧を取得します。",
@@ -191,7 +288,7 @@ export default {
     installedIn: "{{total}} 件中 {{n}} 件にインストール済み",
     catalogFrom: "{{label}} のカタログを表示しています。インストールを押した後に対象のプロファイルを選べます。",
     catalogNoProfile: "カタログを読み込めるプロファイルがありません。",
-    marketplacesPerProfile: "マーケットプレイスはプロファイルごとに管理されます。上で一つ選んでください。"
+    marketplacesPerProfile: "マーケットプレイスはプロファイルごとに管理されます。上でプロファイルを 1 つ選んでください。"
   },
   flow: {
     checking: "コマンドを確認中…",
@@ -226,7 +323,9 @@ export default {
     nowRunning: "実行中",
     summary: "成功 {{ok}}",
     summarySkipped: "成功 {{ok}} · 失敗 {{failed}} · スキップ {{skipped}}",
-    reloadFor: "{{label}}: 変更を反映するには開いているセッションを再読み込みしてください。"
+    reloadFor: "{{label}}: 変更を反映するには開いているセッションを再読み込みしてください。",
+    background: "バックグラウンドで続行",
+    doneToast: "{{subject}}: 完了しました"
   },
   diagnostic: {
     agyUpdate: "agy CLI に文書化されたプラグイン更新コマンドはありません。",

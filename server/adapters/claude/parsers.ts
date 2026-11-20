@@ -1,7 +1,10 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { z } from "zod";
 import type { AuthState, CatalogPlugin, InstalledPlugin, Marketplace, McpServer } from "../../../shared/toolbox/types";
 import type { CatalogResult } from "../../core/adapter";
 import { plain } from "../../core/exec.ts";
+import { safeHttpsUrl } from "../../core/source.ts";
 
 export function parseAuth(text: string): AuthState {
   const data = z.object({
@@ -68,11 +71,53 @@ export function failureReason(stdout: string, stderr: string, secrets: string[])
 
 const installedSchema = z.array(z.object({
   id: z.string(), enabled: z.boolean().optional(), version: z.string().optional(), scope: z.string().optional(),
-  installPath: z.string().optional(), description: z.string().optional(),
+  installPath: z.string().optional(), description: z.string().optional(), projectPath: z.string().optional(),
 }));
 
-export function parseInstalled(data: unknown): InstalledPlugin[] {
-  return installedSchema.parse(data).map(p => {
+/** Scopes Claude records per project directory (`projectPath`). Everything else (user, synced,
+ *  managed ...) applies everywhere. */
+const PROJECT_SCOPES = new Set(["project", "local"]);
+
+function samePath(a: string, b: string): boolean {
+  const canonical = (path: string) => {
+    try {
+      return realpathSync.native(path);
+    } catch {
+      return resolve(path);
+    }
+  };
+  return resolve(a) === resolve(b) || canonical(a) === canonical(b);
+}
+
+/**
+ * `claude plugin list --json` reports installs of every project on the machine. Keep what applies
+ * to `cwd`: everything not tied to a project, plus project/local installs whose projectPath is
+ * `cwd`. `cwd` null = no project open, so project/local installs are dropped. `undefined` keeps
+ * everything (raw view).
+ */
+export function appliesTo(entry: { scope?: string; projectPath?: string }, cwd: string | null | undefined): boolean {
+  if (cwd === undefined || !entry.scope || !PROJECT_SCOPES.has(entry.scope) || !entry.projectPath) return true;
+  return cwd !== null && samePath(entry.projectPath, cwd);
+}
+
+export function parseInstalled(data: unknown, cwd?: string | null): InstalledPlugin[] {
+  const all = installedSchema.parse(data);
+  let entries = all.filter(p => appliesTo(p, cwd));
+  if (cwd) {
+    // A symlinked and a real path to the same project are two records of one install: keep one
+    // per id and scope, preferring the record made under the exact path. CLI order is kept.
+    const exact = (p: { projectPath?: string }) => !!p.projectPath && resolve(p.projectPath) === resolve(cwd);
+    const keep = new Set<(typeof all)[number]>();
+    const seen = new Set<string>();
+    for (const p of [...entries.filter(exact), ...entries.filter(p => !exact(p))]) {
+      const key = p.scope && PROJECT_SCOPES.has(p.scope) ? p.id + "\u0000" + p.scope : null;
+      if (key && seen.has(key)) continue;
+      if (key) seen.add(key);
+      keep.add(p);
+    }
+    entries = entries.filter(p => keep.has(p));
+  }
+  return entries.map(p => {
     const [name, market] = p.id.split("@");
     return { id: p.id, name, marketplace: market ?? null, version: p.version ?? null,
       enabled: p.enabled ?? null, source: p.installPath ?? null, description: p.description ?? null,
@@ -85,37 +130,99 @@ const sourceSchema = z.union([z.string(), z.object({
   package: z.string().optional(), source: z.string().optional(),
 })]);
 
-export function parseCatalog(data: unknown, marketData: unknown): CatalogResult {
+/** Store metadata a marketplace manifest declares for one plugin ("name@marketplace"). */
+export interface ManifestMeta {
+  author: string | null;
+  homepage: string | null;
+  license: string | null;
+  version: string | null;
+  categories: string[];
+}
+
+const text = (value: unknown, max = 200) =>
+  typeof value === "string" && value.trim() ? plain(value).trim().slice(0, max) : null;
+
+/** Reads `.claude-plugin/marketplace.json` contents; unknown shapes are skipped, never thrown. */
+export function parseManifestMeta(manifest: unknown, market: string, into = new Map<string, ManifestMeta>()) {
+  const plugins = (manifest as { plugins?: unknown })?.plugins;
+  if (!Array.isArray(plugins)) return into;
+  for (const raw of plugins) {
+    const p = raw as Record<string, unknown>;
+    const name = text(p?.name);
+    if (!name) continue;
+    const author = p.author as { name?: unknown } | string | undefined;
+    const tags = [p.category, ...(Array.isArray(p.tags) ? p.tags : []), ...(Array.isArray(p.keywords) ? p.keywords : [])];
+    const categories = p.category ? [text(p.category, 40)].filter((c): c is string => !!c) : [];
+    // Tags only fill in when no category is declared, so the chip list stays short.
+    if (!categories.length) {
+      for (const t of tags) {
+        const c = text(t, 40);
+        if (c && !categories.includes(c) && categories.length < 3) categories.push(c);
+      }
+    }
+    into.set(`${name}@${market}`, {
+      author: text(typeof author === "string" ? author : author?.name),
+      homepage: safeHttpsUrl(p.homepage),
+      license: text(p.license, 60),
+      version: text(p.version, 60),
+      categories: categories.map((c) => c.toLowerCase()),
+    });
+  }
+  return into;
+}
+
+export function parseCatalog(
+  data: unknown,
+  marketData: unknown,
+  meta = new Map<string, ManifestMeta>(),
+  /** Marks `installed` only for installs that apply here; see parseInstalled. */
+  cwd?: string | null,
+): CatalogResult {
   const { installed, available } = z.object({
     installed: installedSchema, available: z.array(z.object({
       pluginId: z.string(), name: z.string(), marketplaceName: z.string(),
       description: z.string().nullish(), source: sourceSchema.nullish(), category: z.string().nullish(),
+      version: z.string().nullish(), installCount: z.number().nullish(),
     })),
   }).parse(data);
   const plugins = new Map<string, CatalogPlugin>();
-  for (const p of parseInstalled(installed)) {
+  const installedVersions = new Map<string, string | null>();
+  for (const p of parseInstalled(installed, cwd)) {
+    installedVersions.set(p.id, p.version);
+    const m = meta.get(p.id);
     plugins.set(p.id, { id: p.id, name: p.name, description: p.description, marketplace: p.marketplace,
-      source: null, categories: [], installed: true });
+      source: null, categories: m?.categories ?? [], installed: true, installedVersion: p.version,
+      version: m?.version ?? null, author: m?.author ?? null, homepage: m?.homepage ?? null, license: m?.license ?? null,
+      installs: null, iconUrl: null });
   }
   for (const p of available) {
     const s = p.source;
     const source = typeof s === "string" ? s : s?.url ?? s?.repo ?? s?.package ?? s?.path ?? s?.source;
+    const m = meta.get(p.pluginId);
+    const isInstalled = installedVersions.has(p.pluginId);
     plugins.set(p.pluginId, { id: p.pluginId, name: p.name, description: p.description ?? null,
       marketplace: p.marketplaceName, source: source ? displaySource(source) : null,
-      categories: p.category ? [p.category] : [], installed: plugins.get(p.pluginId)?.installed ?? false });
+      categories: p.category ? [p.category.toLowerCase()] : m?.categories ?? [], installed: isInstalled,
+      installedVersion: isInstalled ? installedVersions.get(p.pluginId) ?? null : null,
+      version: p.version ?? m?.version ?? null, author: m?.author ?? null, homepage: m?.homepage ?? null,
+      license: m?.license ?? null, installs: p.installCount ?? null, iconUrl: null });
   }
   const markets = z.array(z.object({ name: z.string(), source: z.string().optional(),
     repo: z.string().optional(), url: z.string().optional(), path: z.string().optional() })).parse(marketData);
   const counts = new Map<string, number>();
   for (const p of plugins.values()) if (p.marketplace) counts.set(p.marketplace, (counts.get(p.marketplace) ?? 0) + 1);
   const marketplaces: Marketplace[] = markets.map(m => ({ name: m.name,
-    source: displaySource(m.repo ?? m.url ?? m.path ?? m.source ?? "") || null, pluginCount: counts.get(m.name) ?? 0 }));
+    source: displaySource(m.repo ?? m.url ?? m.path ?? m.source ?? "") || null, pluginCount: counts.get(m.name) ?? 0,
+    ...(OFFICIAL_MARKETPLACES.has(m.name) ? { official: true } : {}) }));
   return { marketplaces, plugins: [...plugins.values()] };
 }
+
+/** Marketplaces Claude Code ships with; removing them is allowed but rarely wanted. */
+export const OFFICIAL_MARKETPLACES = new Set(["claude-plugins-official"]);
 
 export function filterCatalog(catalog: CatalogResult, query: string): CatalogResult {
   const needle = query.trim().toLowerCase();
   if (!needle) return catalog;
   return { marketplaces: catalog.marketplaces, plugins: catalog.plugins.filter(p =>
-    [p.id, p.name, p.description].some(s => s?.toLowerCase().includes(needle))) };
+    [p.id, p.name, p.description, p.author, ...p.categories].some(s => s?.toLowerCase().includes(needle))) };
 }

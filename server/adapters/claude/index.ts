@@ -1,11 +1,13 @@
 import { homedir } from "node:os";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ActionPreview, CommandResult, McpAddInput, PluginAction } from "../../../shared/toolbox/types";
+import type { ActionPreview, CommandResult, McpAddInput, PluginAction, PluginSourceInput } from "../../../shared/toolbox/types";
 import type { CatalogResult, ProfileRuntime, ProviderAdapter } from "../../core/adapter";
+import type { MarketplaceAction } from "../../../shared/toolbox/types";
 import type { ExecResult } from "../../core/exec.ts";
 import { runProfile, argvOf } from "../../core/run-profile.ts";
-import { displaySource, filterCatalog, parseAuth, parseCatalog, parseInstalled, parseMcpList, failureReason } from "./parsers.ts";
+import { displaySource, filterCatalog, parseAuth, parseCatalog, parseInstalled, parseManifestMeta, parseMcpList, failureReason, type ManifestMeta } from "./parsers.ts";
+import { checkMarketplaceSource, checkName } from "../../core/source.ts";
 
 function runtime(profile: ProfileRuntime | null) {
   if (!profile) throw new Error("Claude 프로필이 필요합니다.");
@@ -60,15 +62,78 @@ function addPreview(profile: ProfileRuntime, cwd: string | null, server: McpAddI
   return scopedPreview(preview(profile, args, displaySource(server.target), keys.map(key => key + "=***")), server.scope, cwd);
 }
 
-function pluginPreview(profile: ProfileRuntime, action: PluginAction, id: string, marketplace: string | null) {
+function pluginPreview(profile: ProfileRuntime, action: PluginAction, id: string, marketplace: string | null, scope: string | null = null) {
   const fullId = marketplace && !id.includes("@") ? id + "@" + marketplace : id;
-  return preview(profile, ["plugin", action, "--json", "--", fullId], fullId);
+  return preview(profile, ["plugin", action, "--json", ...(scope ? ["-s", scope] : []), "--", fullId], fullId);
 }
 
-const catalogs = new Map<string, { expires: number; loading: Promise<CatalogResult> }>();
+/** project/local scopes write into the agent's project, so they need one. */
+function needsProject(plan: ActionPreview, scope: string | null, cwd: string | null | undefined): ActionPreview {
+  if (!scope || scope === "user") return plan;
+  if (cwd) return { ...plan, warnings: [...plan.warnings, scope + ": " + cwd] };
+  return { ...plan, supported: false, warnings: ["프로젝트 디렉터리를 선택해야 " + scope + " 범위에 설치할 수 있습니다.", ...plan.warnings] };
+}
+
+const THIRD_PARTY = "마켓플레이스에 등록되지 않은 출처의 플러그인입니다. 신뢰하는 출처인지 확인하세요.";
+
+/** `claude plugin install <name> --marketplace <source>`: adds the marketplace (user settings) if needed. */
+async function sourcePlan(profile: ProfileRuntime, source: PluginSourceInput, cwd: string | null | undefined): Promise<ActionPreview> {
+  if (source.kind !== "marketplace") return { command: [], source: null, warnings: ["Claude는 마켓플레이스 출처만 지원합니다."], supported: false };
+  const name = checkName(source.plugin, "Plugin name");
+  if (!name.ok) return { command: [], source: null, warnings: [name.error], supported: false };
+  const market = await checkMarketplaceSource(source.value);
+  if (!market.ok) return { command: [], source: null, warnings: [market.error], supported: false };
+  const scope = source.scope ?? null;
+  const args = ["plugin", "install", "--json", ...(scope ? ["-s", scope] : []), "--marketplace", market.value, "--", name.value];
+  const shown = displaySource(market.value);
+  const plan = preview(profile, args, shown, [THIRD_PARTY, "아직 추가되지 않은 마켓플레이스는 user 설정에 함께 추가됩니다."]);
+  return needsProject(plan, scope, cwd);
+}
+
+/** Argv for display: every URL loses credentials, query and fragment (signed tokens). The CLI
+ *  still runs the full argv; only what is returned to the app is cleaned. */
+function shown<T extends { command: string[] }>(value: T): T {
+  return { ...value, command: value.command.map((arg) => (/^https?:\/\//i.test(arg) ? displaySource(arg) : arg)) };
+}
+
+function marketplacePlan(profile: ProfileRuntime, action: MarketplaceAction, source: string): ActionPreview {
+  return preview(profile, ["plugin", "marketplace", action, "--json", "--", source], displaySource(source));
+}
+
+async function checkedMarketplacePlan(profile: ProfileRuntime, action: MarketplaceAction, source: string): Promise<ActionPreview> {
+  if (action === "add") {
+    const checked = await checkMarketplaceSource(source);
+    if (!checked.ok) return { command: [], source: null, warnings: [checked.error], supported: false };
+    return { ...marketplacePlan(profile, action, checked.value), warnings: [THIRD_PARTY] };
+  }
+  const name = checkName(source, "Marketplace name");
+  if (!name.ok) return { command: [], source: null, warnings: [name.error], supported: false };
+  return marketplacePlan(profile, action, name.value);
+}
+
+/** CLI output kept raw, so each call can mark installs for its own project directory. */
+interface RawCatalog { plugins: unknown; markets: unknown; meta: Map<string, ManifestMeta> }
+
+const catalogs = new Map<string, { expires: number; loading: Promise<RawCatalog> }>();
 
 function catalogKey(p: ProfileRuntime) {
   return JSON.stringify([p.id, p.configHome, p.command, p.args]);
+}
+
+/** Author, homepage, category ... from each marketplace's manifest on disk (read-only). */
+async function manifestMeta(markets: unknown): Promise<Map<string, ManifestMeta>> {
+  const meta = new Map<string, ManifestMeta>();
+  if (!Array.isArray(markets)) return meta;
+  await Promise.all(markets.map(async (m: { name?: unknown; installLocation?: unknown }) => {
+    if (typeof m?.name !== "string" || typeof m.installLocation !== "string") return;
+    try {
+      const manifest = JSON.parse(await readFile(join(m.installLocation, ".claude-plugin", "marketplace.json"), "utf8"));
+      parseManifestMeta(manifest, m.name, meta);
+    } catch {
+      // Unreadable manifest: its plugins just show less metadata.
+    }
+  }));
+  return meta;
 }
 
 async function loadCatalog(p: ProfileRuntime) {
@@ -76,7 +141,16 @@ async function loadCatalog(p: ProfileRuntime) {
     read(p, ["plugin", "list", "--json", "--available"]),
     read(p, ["plugin", "marketplace", "list", "--json"]),
   ]);
-  return parseCatalog(parseOutput(plugins), parseOutput(markets));
+  const marketData = parseOutput(markets);
+  const raw: RawCatalog = { plugins: parseOutput(plugins), markets: marketData, meta: await manifestMeta(marketData) };
+  // Validate once up front so a bad shape fails the load (and is not cached).
+  parseCatalog(raw.plugins, raw.markets, raw.meta, null);
+  return raw;
+}
+
+async function catalogFor(p: ProfileRuntime, cwd: string | null): Promise<CatalogResult> {
+  const raw = await cachedCatalog(p);
+  return parseCatalog(raw.plugins, raw.markets, raw.meta, cwd);
 }
 
 async function cachedCatalog(p: ProfileRuntime) {
@@ -106,29 +180,23 @@ function newer(a: string, b: string): boolean {
   return false;
 }
 
+/** Manifest metadata of every configured marketplace, keyed "name@marketplace", read from disk
+ *  via known_marketplaces.json (no CLI run). Unreadable marketplaces contribute nothing. */
+async function knownManifestMeta(p: ProfileRuntime): Promise<Map<string, ManifestMeta>> {
+  const home = p.configHome ?? join(homedir(), ".claude");
+  try {
+    const known = JSON.parse(await readFile(join(home, "plugins", "known_marketplaces.json"), "utf8"));
+    if (!known || typeof known !== "object") return new Map();
+    return manifestMeta(Object.entries(known).map(([name, info]) => ({ name, ...(info as object) })));
+  } catch {
+    return new Map();
+  }
+}
+
 /** Plugin versions declared by each configured marketplace's manifest, keyed "name@marketplace". */
 async function marketplaceVersions(p: ProfileRuntime): Promise<Map<string, string>> {
-  const home = p.configHome ?? join(homedir(), ".claude");
   const versions = new Map<string, string>();
-  let known: Record<string, { installLocation?: string }> = {};
-  try {
-    known = JSON.parse(await readFile(join(home, "plugins", "known_marketplaces.json"), "utf8"));
-  } catch {
-    return versions;
-  }
-  await Promise.all(Object.entries(known).map(async ([market, info]) => {
-    if (!info?.installLocation) return;
-    try {
-      const manifest = JSON.parse(await readFile(join(info.installLocation, ".claude-plugin", "marketplace.json"), "utf8"));
-      for (const plugin of manifest.plugins ?? []) {
-        if (typeof plugin?.name === "string" && typeof plugin?.version === "string") {
-          versions.set(`${plugin.name}@${market}`, plugin.version);
-        }
-      }
-    } catch {
-      // unreadable marketplace: no update info for its plugins
-    }
-  }));
+  for (const [id, meta] of await knownManifestMeta(p)) if (meta.version) versions.set(id, meta.version);
   return versions;
 }
 
@@ -216,34 +284,55 @@ export const claudeAdapter: ProviderAdapter = {
       error: `${profile.id} 프로필로 Claude 터미널을 열고 /mcp에서 ${name} 인증을 완료하세요. mcp login --no-browser는 리디렉션 URL 입력이 필요합니다.` };
   },
   async listInstalled(profile, cwd) {
-    return parseInstalled(parseOutput(await read(runtime(profile), ["plugin", "list", "--json"], cwd)));
-  },
-  async listCatalog(profile, query) {
     const p = runtime(profile);
-    return filterCatalog(await cachedCatalog(p), query);
+    const [plugins, meta] = await Promise.all([
+      read(p, ["plugin", "list", "--json"], cwd).then((text) => parseInstalled(parseOutput(text), cwd ?? null)),
+      knownManifestMeta(p),
+    ]);
+    return plugins.map((plugin) => {
+      const m = meta.get(plugin.id);
+      return m ? { ...plugin, author: m.author, homepage: m.homepage, categories: m.categories, iconUrl: null } : plugin;
+    });
   },
-  async previewAction(profile, action, id, marketplace) {
+  async listCatalog(profile, query, cwd) {
     const p = runtime(profile);
-    const plan = pluginPreview(p, action, id, marketplace);
+    return filterCatalog(await catalogFor(p, cwd ?? null), query);
+  },
+  async previewAction(profile, action, id, marketplace, cwd, scope) {
+    const p = runtime(profile);
+    const plan = needsProject(pluginPreview(p, action, id, marketplace, scope ?? null), scope ?? null, cwd);
     const fullId = plan.command.at(-1)!;
     const market = fullId.split("@")[1] ?? marketplace;
-    const catalog = await cachedCatalog(p).catch(() => null);
+    const catalog = await catalogFor(p, null).catch(() => null);
     const candidates = catalog?.plugins.filter(plugin => plugin.id === fullId || (!market && plugin.name === id));
     const match = candidates?.length === 1 ? candidates[0] : null;
     return { ...plan, source: match?.source ?? match?.marketplace ?? market };
   },
-  async runAction(profile, action, id, marketplace, cwd) {
+  async runAction(profile, action, id, marketplace, cwd, scope) {
     const p = runtime(profile);
-    const result = await mutate(p, pluginPreview(p, action, id, marketplace), cwd);
+    const plan = needsProject(pluginPreview(p, action, id, marketplace, scope ?? null), scope ?? null, cwd);
+    const result = await mutate(p, plan, cwd);
     if (result.ok) catalogs.delete(catalogKey(p));
     return result;
   },
+  async previewSource(profile, source, cwd) {
+    return shown(await sourcePlan(runtime(profile), source, cwd));
+  },
+  async installSource(profile, source, cwd) {
+    const p = runtime(profile);
+    const plan = await sourcePlan(p, source, cwd);
+    const result = await mutate(p, plan, cwd, undefined, [source.value, ...plan.command.slice(-3, -2)]);
+    if (result.ok) catalogs.delete(catalogKey(p));
+    return shown(result);
+  },
+  async previewMarketplaceAction(profile, action, source) {
+    return shown(await checkedMarketplacePlan(runtime(profile), action, source));
+  },
   async runMarketplaceAction(profile, action, source) {
     const p = runtime(profile);
-    const plan = preview(p, ["plugin", "marketplace", action, "--json", "--", source], source);
-    const result = await mutate(p, plan);
+    const plan = await checkedMarketplacePlan(p, action, source);
+    const result = await mutate(p, plan, undefined, undefined, [source, ...plan.command.slice(-1)]);
     if (result.ok) catalogs.delete(catalogKey(p));
-    result.command[result.command.length - 1] = displaySource(source);
-    return result;
+    return shown(result);
   },
 };

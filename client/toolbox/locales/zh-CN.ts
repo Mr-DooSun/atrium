@@ -181,14 +181,111 @@ export default {
       marketplaceRemove: "移除市场",
       marketplaceUpdate: "更新市场"
     },
-    catalogShown: "显示 {{total}} 项中的 {{shown}} 项 · 按名称",
+    catalogCount: "显示 {{shown}} / {{total}} 项",
+    searchInstalled: "搜索已安装的插件",
+    featured: "精选",
+    official: "官方",
+    installScope: "安装到",
+    scopeNeedsProject: "项目范围需要先选择项目。请在代理中打开 /plugins 后使用。",
+    source: {
+      button: "从来源安装",
+      title: "从来源安装",
+      kind: "来源",
+      kinds: {
+        git: "Git",
+        npm: "npm",
+        local: "本地文件夹",
+        marketplace: "市场"
+      },
+      valueLabel: {
+        git: "仓库",
+        npm: "包",
+        local: "文件夹路径",
+        marketplace: "市场来源"
+      },
+      valuePlaceholder: {
+        git: "owner/repo 或 https://…",
+        npm: "@scope/package",
+        local: "/absolute/path/to/plugin",
+        marketplace: "owner/repo、URL 或路径"
+      },
+      invalidValue: {
+        git: "请输入不含空格的仓库地址",
+        npm: "请输入有效的 npm 包名",
+        local: "请输入绝对路径",
+        marketplace: "请输入不含空格的市场来源"
+      },
+      plugin: "插件名称",
+      pluginPlaceholder: "my-plugin",
+      ref: "分支、标签或提交（可选）",
+      refPlaceholder: "main",
+      refNote: "填写完整的提交 SHA 可将安装固定到该版本。",
+      version: "版本或标签（可选）",
+      versionPlaceholder: "latest",
+      path: "来源中的插件文件夹（可选）",
+      pathPlaceholder: "plugins/my-plugin",
+      review: "查看命令"
+    },
+    installs: "安装次数：{{n}}",
+    clearSearch: "清除搜索",
+    clearFilters: "清除搜索和筛选",
+    filterEmpty: "没有符合搜索和筛选条件的插件",
+    updateTo: "更新到 {{version}}",
+    filters: {
+      all: "全部",
+      updates: "可更新",
+      errors: "出错",
+      enabled: "已启用",
+      disabled: "已禁用"
+    },
+    sort: {
+      name: "名称",
+      attention: "需要关注",
+      updated: "最近更新",
+      installs: "安装最多"
+    },
+    state: {
+      dismiss: "关闭",
+      running: {
+        install: "正在安装…",
+        update: "正在更新…",
+        remove: "正在移除…",
+        enable: "正在启用…",
+        disable: "正在禁用…"
+      },
+      failed: {
+        install: "安装失败",
+        update: "更新失败",
+        remove: "卸载失败",
+        enable: "启用失败",
+        disable: "禁用失败"
+      }
+    },
+    detail: {
+      title: "插件详情",
+      open: "查看详情",
+      noDescription: "暂无说明",
+      by: "作者：{{author}}",
+      author: "作者",
+      version: "版本",
+      installedVersion: "已安装版本",
+      latestVersion: "最新版本",
+      updateTo: "更新到",
+      scope: "范围",
+      marketplace: "市场",
+      source: "来源",
+      homepage: "打开主页",
+      installs: "安装次数",
+      updated: "更新时间",
+      license: "许可证"
+    },
     loadMore: "再显示 {{n}} 项",
     antigravityBrowseNote: "请在 agy 中使用 /plugin 浏览 Antigravity 市场。此处显示工具箱找到的条目。",
     marketplaceAddWarning: "从此来源获取插件列表。",
     marketplaceRemoveWarning: "从此配置中移除此市场及其列表。",
     marketplaceUpdateWarning: "重新获取市场列表。",
     installToRest: "安装到其余账户",
-    installedIn: "已在 {{total}} 个配置中的 {{n}} 个安装",
+    installedIn: "已安装到 {{n}} 个配置（共 {{total}} 个）",
     catalogFrom: "正在浏览 {{label}} 的目录。点击安装后可选择目标配置。",
     catalogNoProfile: "没有可加载目录的配置。",
     marketplacesPerProfile: "市场按配置管理。请在上方选择一个配置。"
@@ -209,7 +306,7 @@ export default {
     output: "输出",
     noOutput: "无输出",
     error: "错误",
-    reloadNeeded: "重新加载此配置的打开会话以应用更改。",
+    reloadNeeded: "重新加载此配置中已打开的会话以应用更改。",
     reloadNeededPaseo: "重新加载 Paseo 插件以应用更改。",
     reloadIdle: "重新加载空闲会话（{{n}}）",
     reloadNoIdle: "没有可重新加载的空闲会话",
@@ -226,7 +323,9 @@ export default {
     nowRunning: "正在运行",
     summary: "成功 {{ok}}",
     summarySkipped: "成功 {{ok}} · 失败 {{failed}} · 跳过 {{skipped}}",
-    reloadFor: "{{label}}：重新加载打开的会话以应用更改。"
+    reloadFor: "{{label}}：重新加载打开的会话以应用更改。",
+    background: "转入后台继续",
+    doneToast: "{{subject}}：已完成"
   },
   diagnostic: {
     agyUpdate: "agy CLI 没有文档说明的插件更新命令。",

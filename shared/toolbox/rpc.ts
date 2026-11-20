@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   ActionPreview,
   CatalogPlugin,
+  CatalogSort,
   CommandResult,
   Ecosystem,
   InstalledPlugin,
@@ -12,6 +13,7 @@ import {
   McpAddInput,
   McpServer,
   PluginAction,
+  PluginSourceInput,
   Profile,
 } from "./types";
 
@@ -82,6 +84,9 @@ export const listCatalog = defineRpc({
     /** Page start within the name-sorted matches. */
     offset: z.number().int().min(0).default(0),
     limit: z.number().int().min(1).max(CATALOG_LIMIT).default(CATALOG_LIMIT),
+    /** Exact category match; null/absent = all. */
+    category: z.string().nullable().optional(),
+    sort: CatalogSort.optional(),
   }),
   output: z.object({
     /** One page of matches, sorted by name; `total` counts every match. */
@@ -89,6 +94,8 @@ export const listCatalog = defineRpc({
     total: z.number(),
     marketplaces: z.array(Marketplace),
     error: z.string().nullable(),
+    /** Every category among the query matches (before the category filter), for filter chips. */
+    categories: z.array(z.string()).optional(),
   }),
 });
 
@@ -97,6 +104,8 @@ const pluginActionInput = z.object({
   action: PluginAction,
   pluginId: z.string(),
   marketplace: z.string().nullable(),
+  /** One of ECOSYSTEM_CAPS[eco].scopes; null/absent = the CLI default. */
+  scope: z.string().nullable().optional(),
 });
 
 export const previewPluginAction = defineRpc({
@@ -109,6 +118,29 @@ export const runPluginAction = defineRpc({
   name: "toolbox.plugins.run",
   input: pluginActionInput,
   output: CommandResult,
+});
+
+const sourceInstallInput = z.object({ ...pluginScope, source: PluginSourceInput });
+
+/** Validates a direct source (git, npm, local directory, marketplace) and shows what would run. */
+export const previewSourceInstall = defineRpc({
+  name: "toolbox.plugins.preview-source",
+  input: sourceInstallInput,
+  output: ActionPreview,
+});
+
+/** Installs from a direct source. Paseo requires an unexpired preview of the identical input. */
+export const runSourceInstall = defineRpc({
+  name: "toolbox.plugins.install-source",
+  input: sourceInstallInput,
+  output: CommandResult,
+});
+
+/** What a marketplace action would run, for the confirmation modal. */
+export const previewMarketplaceAction = defineRpc({
+  name: "toolbox.plugins.marketplace-preview",
+  input: z.object({ ...pluginScope, action: MarketplaceAction, source: z.string() }),
+  output: ActionPreview,
 });
 
 export const runMarketplaceAction = defineRpc({

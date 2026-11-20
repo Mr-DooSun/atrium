@@ -1,7 +1,7 @@
 // "/plugins": Paseo's own plugins and each agent CLI's plugins, per profile or for every profile
 // of a kind side by side ("전체"), where actions run on several profiles at once.
-import { useEffect, useMemo, useState } from "react";
-import { View } from "react-native";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ActivityIndicator, Text, View } from "react-native";
 import { keepPreviousData, useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
 import { useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { TextInput } from "@getpaseo/plugin/client/ui";
@@ -9,23 +9,45 @@ import {
   CATALOG_PAGE,
   listCatalog,
   listInstalledPlugins,
+  previewMarketplaceAction,
   previewPluginAction,
+  previewSourceInstall,
   runMarketplaceAction,
   runPluginAction,
+  runSourceInstall,
 } from "../../shared/toolbox/rpc";
 import {
   ECOSYSTEM_CAPS,
   type CatalogPlugin,
+  type CatalogSort,
   type Ecosystem,
   type InstalledPlugin,
   type Marketplace,
   type MarketplaceAction,
   type PluginAction,
+  type PluginSourceInput,
   type Profile,
 } from "../../shared/toolbox/types";
+import { SourceInstallModal } from "./source-form";
+import {
+  ACTIVITY_OF,
+  FILTERS,
+  PROJECT_SCOPES,
+  attention,
+  catalogSorts,
+  installedView,
+  pluginFacts,
+  rowFacts,
+  trackKey,
+  type Facts,
+  type InstalledFilter,
+  type InstalledSort,
+  type PluginRow,
+} from "./store-logic";
 import { palette } from "../look";
-import { useActionFlow, type ActionFlow, type ActionTarget } from "./action-flow";
+import { useActionFlow, type ActionFlow, type ActionTarget, type Activity, type ActivityKind } from "./action-flow";
 import { keys, useProfiles } from "./queries";
+import { CardGrid, PluginCard, PluginDetail, StateControl, catalogMeta, installedMeta, versionText } from "./store";
 import { ToolboxTextProvider, useToolboxStrings, useToolboxText, type Strings } from "./strings";
 import {
   ALL_PROFILES,
@@ -38,6 +60,8 @@ import {
   type Presence,
   Button,
   Card,
+  Chip,
+  ChipRow,
   EmptyState,
   ListRow,
   LoadingLine,
@@ -49,6 +73,7 @@ import {
   ProviderGlyph,
   RADIUS,
   ScreenBody,
+  SearchField,
   SectionLabel,
   Segmented,
   errorText,
@@ -186,6 +211,7 @@ function EcosystemView({
   flow: ActionFlow;
 }) {
   const t = useToolboxText();
+  const { p } = useLook();
   const [section, setSection] = useState<Section>("installed");
   const caps = ECOSYSTEM_CAPS[ecosystem];
   const sections: Section[] = caps.marketplace.length > 0 ? ["installed", "browse", "marketplaces"] : ["installed", "browse"];
@@ -194,10 +220,19 @@ function EcosystemView({
   const preview = useRpc(previewPluginAction);
   const runAction = useRpc(runPluginAction);
   const runMarket = useRpc(runMarketplaceAction);
+  const previewMarket = useRpc(previewMarketplaceAction);
+  const previewSource = useRpc(previewSourceInstall);
+  const runSource = useRpc(runSourceInstall);
   const where = profile ? profile.label : t.plugins.tabs.paseo;
+  const [sourceOpen, setSourceOpen] = useState(false);
+  // Where catalog installs go, for CLIs with install scopes; project scopes need a project.
+  const [installScope, setInstallScope] = useState<string | null>(
+    caps.scopes.find((s) => cwd || !PROJECT_SCOPES.includes(s)) ?? null,
+  );
 
-  const startPlugin = (action: PluginAction, pluginId: string, name: string, marketplace: string | null) => {
-    const input = { ...scope, action, pluginId, marketplace };
+  const startPlugin: StartPlugin = (action, pluginId, name, marketplace, pluginScope) => {
+    const target = action === "install" ? installScope : pluginScope && caps.scopes.includes(pluginScope) ? pluginScope : null;
+    const input = { ...scope, action, pluginId, marketplace, scope: target };
     flow.start({
       title: t.plugins.titles[action],
       subject: `${where} · ${name}`,
@@ -207,6 +242,7 @@ function EcosystemView({
       run: () => runAction(input),
       invalidate: [keys.plugins(ecosystem, profileId)],
       reloadProvider: profileId,
+      track: { key: trackKey(ecosystem, profileId, pluginId), kind: ACTIVITY_OF[action] },
     });
   };
 
@@ -228,7 +264,7 @@ function EcosystemView({
       subject: `${where} · ${source}`,
       destructive: action === "remove",
       bringsCode: action === "add",
-      preview: null,
+      preview: () => previewMarket({ ...scope, action, source }),
       localWarnings: [warning],
       run: () => runMarket({ ...scope, action, source }),
       invalidate: [keys.plugins(ecosystem, profileId)],
@@ -239,14 +275,59 @@ function EcosystemView({
     });
   };
 
+  const startSource = (source: PluginSourceInput) => {
+    setSourceOpen(false);
+    const input = { ...scope, source };
+    flow.start({
+      title: t.plugins.source.title,
+      subject: `${where} · ${source.kind === "marketplace" && source.plugin ? `${source.plugin}@${source.value}` : source.value}`,
+      bringsCode: true,
+      preview: () => previewSource(input),
+      run: () => runSource(input),
+      invalidate: [keys.plugins(ecosystem, profileId)],
+      reloadProvider: profileId,
+    });
+  };
+
+  const scopePicker =
+    caps.scopes.length > 0 && caps.plugin.includes("install") ? (
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Text style={{ color: p.muted, fontSize: 12 }}>{t.plugins.installScope}</Text>
+        <Segmented<string>
+          value={installScope ?? ""}
+          options={caps.scopes.map((s) => ({
+            value: s,
+            label: pluginScopeLabel(t, ecosystem, s),
+            disabled: PROJECT_SCOPES.includes(s) && !cwd,
+          }))}
+          onChange={setInstallScope}
+        />
+      </View>
+    ) : null;
+
   return (
     <View style={{ gap: 12 }}>
-      <Segmented<Section> value={section} options={sections.map((s) => ({ value: s, label: t.plugins.sections[s] }))} onChange={setSection} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <Segmented<Section> value={section} options={sections.map((s) => ({ value: s, label: t.plugins.sections[s] }))} onChange={setSection} />
+        {caps.sources.length > 0 && section !== "marketplaces" ? (
+          <Button icon="PackagePlus" label={t.plugins.source.button} onPress={() => setSourceOpen(true)} disabled={flow.busy} />
+        ) : null}
+      </View>
       {section === "installed" ? (
-        <InstalledList scope={scope} busy={flow.busy} onAction={startPlugin} />
+        <InstalledList scope={scope} busy={flow.busy} onAction={startPlugin} activity={flow.activity} />
       ) : null}
       {section === "browse" ? (
-        <BrowseList scope={scope} busy={flow.busy} onAction={startPlugin} />
+        <BrowseList
+          scope={scope}
+          busy={flow.busy}
+          onAction={startPlugin}
+          activity={flow.activity}
+          trackProfile={profileId}
+          scopePicker={scopePicker}
+        />
+      ) : null}
+      {sourceOpen ? (
+        <SourceInstallModal ecosystem={ecosystem} cwd={cwd} where={where} onClose={() => setSourceOpen(false)} onSubmit={startSource} />
       ) : null}
       {section === "marketplaces" ? (
         <MarketplaceList scope={scope} busy={flow.busy} onAction={startMarket} />
@@ -261,16 +342,92 @@ interface Scope {
   cwd: string | null;
 }
 
-type StartPlugin = (action: PluginAction, pluginId: string, name: string, marketplace: string | null) => void;
+/** `scope`: where the plugin is installed (installed list), so the action targets that config. */
+type StartPlugin = (action: PluginAction, pluginId: string, name: string, marketplace: string | null, scope?: string | null) => void;
+
+export { ACTIVITY_OF, FILTERS, attention, catalogSorts, pluginFacts, rowFacts, trackKey };
+
+/** A unique key per item: `base(item)`, with "#2", "#3" ... for repeats, in list order. */
+function withKeys<T>(items: readonly T[], base: (item: T) => string): Map<T, string> {
+  const seen = new Map<string, number>();
+  const out = new Map<T, string>();
+  for (const item of items) {
+    const b = base(item);
+    const n = (seen.get(b) ?? 0) + 1;
+    seen.set(b, n);
+    out.set(item, n === 1 ? b : `${b}#${n}`);
+  }
+  return out;
+}
+
+// ---- Installed: search, state filters, sort ----------------------------------------------------
+
+/** Search, filter chips and sort over a complete (unpaged) list; the logic is `installedView`. */
+export function useInstalledView<T>(items: readonly T[], facts: (item: T) => Facts) {
+  const [text, setText] = useState("");
+  const [filter, setFilter] = useState<InstalledFilter>("all");
+  const [sort, setSort] = useState<InstalledSort>("name");
+  const view = installedView(items, facts, filter, text, sort);
+  return { text, setText, setFilter, sort, setSort, ...view };
+}
+
+/** What the toolbar reads and sets; the list itself stays with the caller. */
+type InstalledControls = Omit<ReturnType<typeof useInstalledView<unknown>>, "shown" | "total">;
+
+function InstalledToolbar({ view }: { view: InstalledControls }) {
+  const t = useToolboxText();
+  const { compact } = useLook();
+  const chips: { value: InstalledFilter; label: string; icon?: string }[] = [
+    { value: "all", label: t.plugins.filters.all },
+    { value: "updates", label: t.plugins.filters.updates, icon: "ArrowUpCircle" },
+    { value: "errors", label: t.plugins.filters.errors, icon: "TriangleAlert" },
+    { value: "enabled", label: t.plugins.filters.enabled },
+    { value: "disabled", label: t.plugins.filters.disabled },
+  ];
+  const sort = (
+    <Segmented<InstalledSort>
+      value={view.sort}
+      options={[
+        { value: "name", label: t.plugins.sort.name },
+        { value: "attention", label: t.plugins.sort.attention },
+      ]}
+      onChange={view.setSort}
+    />
+  );
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "center", gap: 8 }}>
+        <SearchField value={view.text} onChange={view.setText} placeholder={t.plugins.searchInstalled} clearLabel={t.plugins.clearSearch} />
+        {sort}
+      </View>
+      <ChipRow>
+        {chips
+          .filter((c) => c.value === "all" || view.counts[c.value] > 0)
+          .map((c) => (
+            <Chip
+              key={c.value}
+              label={c.label}
+              icon={c.icon}
+              count={view.counts[c.value]}
+              active={view.filter === c.value}
+              onPress={() => view.setFilter(c.value)}
+            />
+          ))}
+      </ChipRow>
+    </View>
+  );
+}
 
 function InstalledList({
   scope,
   busy,
   onAction,
+  activity,
 }: {
   scope: Scope;
   busy: boolean;
   onAction: StartPlugin;
+  activity: ActionFlow["activity"];
 }) {
   const t = useToolboxText();
   const list = useRpc(listInstalledPlugins);
@@ -279,92 +436,152 @@ function InstalledList({
     queryFn: () => list(scope),
   });
   const items = query.data?.plugins ?? [];
+  const view = useInstalledView(items, pluginFacts);
+  const [open, setOpen] = useState<string | null>(null);
+  // One plugin id can be listed once per scope (and per project for local scope), so cards are
+  // keyed by id, scope and occurrence; a bare id would collide and React would reuse wrong rows.
+  const keyed = useMemo(() => withKeys(items, (x) => `${x.id}\u0000${x.scope ?? ""}`), [items]);
+  const keyOf = (plugin: InstalledPlugin) => keyed.get(plugin) ?? plugin.id;
+  const opened = open ? items.find((x) => keyOf(x) === open) ?? null : null;
   return (
     <View style={{ gap: 8 }}>
       {query.isPending ? <LoadingLine /> : null}
       {query.isError ? <Notice tone="danger" text={`${t.plugins.loadError}: ${t.diagnostic(errorText(query.error))}`} /> : null}
       {query.data?.error ? <Notice tone="warning" text={t.diagnostic(query.data.error)} /> : null}
       {query.isSuccess && items.length === 0 ? <EmptyState icon="Package" title={t.plugins.installedEmpty} /> : null}
-      {items.length > 0 ? (
-        <Card>
-          {items.map((plugin, i) => (
-            <InstalledRow
-              key={plugin.id}
+      {items.length > 0 ? <InstalledToolbar view={view} /> : null}
+      {items.length > 0 && view.shown.length === 0 ? <EmptyState icon="SearchX" title={t.plugins.filterEmpty} /> : null}
+      {view.shown.length > 0 ? (
+        <View style={{ gap: 8 }}>
+          {view.shown.map((plugin) => (
+            <InstalledCard
+              key={keyOf(plugin)}
               plugin={plugin}
-              can={ECOSYSTEM_CAPS[scope.ecosystem].plugin}
-              ecosystem={scope.ecosystem}
-              first={i === 0}
+              scope={scope}
               busy={busy}
               onAction={onAction}
+              activity={activity(trackKey(scope.ecosystem, scope.profileId, plugin.id))}
+              onOpen={() => setOpen(keyOf(plugin))}
             />
           ))}
-        </Card>
+        </View>
+      ) : null}
+      {opened ? (
+        <InstalledCard
+          detail
+          plugin={opened}
+          scope={scope}
+          busy={busy}
+          onAction={(...args) => {
+            setOpen(null);
+            onAction(...args);
+          }}
+          activity={activity(trackKey(scope.ecosystem, scope.profileId, opened.id))}
+          onOpen={() => setOpen(null)}
+        />
       ) : null}
     </View>
   );
 }
 
-function InstalledRow({
+/** One installed plugin of one profile, as a card or (with `detail`) as the detail sheet. */
+function InstalledCard({
   plugin,
-  ecosystem,
-  can,
-  first,
+  scope,
   busy,
   onAction,
+  activity,
+  onOpen,
+  detail,
 }: {
   plugin: InstalledPlugin;
-  ecosystem: Ecosystem;
-  can: readonly PluginAction[];
-  first: boolean;
+  scope: Scope;
   busy: boolean;
   onAction: StartPlugin;
+  activity: Activity | null;
+  /** Card: opens the detail. Detail: closes it. */
+  onOpen(): void;
+  detail?: boolean;
 }) {
   const t = useToolboxText();
-  const act = (action: PluginAction) => onAction(action, plugin.id, plugin.name, plugin.marketplace);
-  const update = plugin.updateTo ?? null;
-  const meta = [
-    plugin.version ? `v${plugin.version}${update ? ` → ${/^[0-9a-f]{7}$/.test(update) ? update : `v${update}`}` : ""}` : null,
-    plugin.marketplace,
-    plugin.status,
-  ].filter(Boolean).join(" · ");
+  const can = ECOSYSTEM_CAPS[scope.ecosystem].plugin;
+  const m = installedMeta(plugin);
+  const act = (action: PluginAction) => onAction(action, plugin.id, plugin.name, plugin.marketplace, plugin.scope ?? null);
+  const running = activity?.state === "running";
+  const scopeLabel = pluginScopeLabel(t, scope.ecosystem, plugin.scope);
+  const control = (
+    <StateControl
+      state={{ installed: true, updateTo: m.updateTo, activity }}
+      onInstall={null}
+      onUpdate={can.includes("update") && m.updateTo ? () => act("update") : null}
+      busy={busy}
+      small={!detail}
+      hideInstalled={!detail}
+    />
+  );
+  const toggle = plugin.enabled === null ? null : plugin.enabled ? "disable" : "enable";
+  const actions = running ? null : (
+    <>
+      {toggle && can.includes(toggle) ? (
+        <Button
+          small={!detail}
+          icon={plugin.enabled ? "PowerOff" : "Power"}
+          label={plugin.enabled ? t.plugins.actions.disable : t.plugins.actions.enable}
+          onPress={() => act(toggle)}
+          disabled={busy}
+        />
+      ) : null}
+      {can.includes("uninstall") ? (
+        <Button small={!detail} icon="Trash2" label={t.plugins.actions.uninstall} onPress={() => act("uninstall")} disabled={busy} />
+      ) : null}
+    </>
+  );
+  if (detail) {
+    return (
+      <PluginDetail
+        info={{
+          name: plugin.name,
+          meta: m,
+          description: plugin.description,
+          marketplace: plugin.marketplace,
+          source: plugin.source,
+          scope: scopeLabel,
+          errors: [activity?.state === "failed" && activity.error ? t.diagnostic(activity.error) : null, plugin.error ? t.diagnostic(plugin.error) : null].filter(
+            (x): x is string => !!x,
+          ),
+        }}
+        control={control}
+        actions={actions}
+        onClose={onOpen}
+      />
+    );
+  }
+  const failure = activity?.state === "failed" && activity.error ? t.diagnostic(activity.error) : null;
   return (
-    <ListRow
-      first={first}
-      title={plugin.name}
-      badge={
+    <PluginCard
+      layout="row"
+      name={plugin.name}
+      meta={m}
+      subtitle={[m.version ? versionText(m.version) : null, m.author, plugin.marketplace, plugin.status].filter(Boolean).join(" · ") || null}
+      description={failure ?? (plugin.error ? t.diagnostic(plugin.error) : plugin.description)}
+      descriptionTone={failure || plugin.error ? "danger" : "muted"}
+      badges={
         <>
-          <Badge label={pluginScopeLabel(t, ecosystem, plugin.scope)} />
-          {update ? <Badge label={t.plugins.updateAvailable} tone="warning" /> : null}
+          <Badge label={scopeLabel} />
+          {m.updateTo ? <Badge label={t.plugins.updateTo(versionText(m.updateTo))} tone="warning" /> : null}
           {plugin.enabled === null ? null : (
             <Badge label={plugin.enabled ? t.plugins.enabled : t.plugins.disabled} tone={plugin.enabled ? "success" : "muted"} />
           )}
         </>
       }
-      meta={meta || null}
-      detail={plugin.error ? t.diagnostic(plugin.error) : plugin.description}
-      detailTone={plugin.error ? "danger" : "muted"}
-      actions={
-        <>
-          {plugin.enabled !== null && can.includes(plugin.enabled ? "disable" : "enable") ? (
-            <Button
-              small
-              label={plugin.enabled ? t.plugins.actions.disable : t.plugins.actions.enable}
-              onPress={() => act(plugin.enabled ? "disable" : "enable")}
-              disabled={busy}
-            />
-          ) : null}
-          {/* Only plugins with a known newer version get an update button. */}
-          {can.includes("update") && update ? (
-            <Button small icon="RefreshCw" label={t.plugins.actions.update} onPress={() => act("update")} disabled={busy} />
-          ) : null}
-          {can.includes("uninstall") ? (
-            <Button small icon="Trash2" label={t.plugins.actions.uninstall} onPress={() => act("uninstall")} disabled={busy} />
-          ) : null}
-        </>
-      }
+      control={control}
+      actions={actions}
+      onOpen={onOpen}
     />
   );
 }
+
+// ---- Browse ----------------------------------------------------------------------------------
 
 /** Debounced search text, so typing does not fire a catalog call per key. */
 function useDebounced(value: string, ms: number): string {
@@ -388,12 +605,19 @@ function useCatalog(scope: Scope, search: string, enabled = true) {
   });
 }
 
+/** Store filters the catalog applies on the daemon, so paging stays honest. */
+interface StoreQuery {
+  category: string | null;
+  sort: CatalogSort;
+}
+
 /** Browse pages: the first page on open, the next one each time the user asks for more. */
-function useCatalogPages(scope: Scope, search: string, enabled: boolean) {
+function useCatalogPages(scope: Scope, search: string, store: StoreQuery, enabled: boolean) {
   const list = useRpc(listCatalog);
   return useInfiniteQuery({
-    queryKey: [...keys.catalog(scope.ecosystem, scope.profileId, scope.cwd, search), "pages"],
-    queryFn: ({ pageParam }) => list({ ...scope, query: search, offset: pageParam, limit: CATALOG_PAGE }),
+    queryKey: [...keys.catalog(scope.ecosystem, scope.profileId, scope.cwd, search), "pages", store.category, store.sort],
+    queryFn: ({ pageParam }) =>
+      list({ ...scope, query: search, offset: pageParam, limit: CATALOG_PAGE, category: store.category, sort: store.sort }),
     initialPageParam: 0,
     getNextPageParam: (last, pages) => {
       const loaded = pages.reduce((n, page) => n + page.plugins.length, 0);
@@ -409,74 +633,120 @@ function BrowseList({
   scope,
   busy,
   onAction,
+  activity,
+  trackProfile,
   installedIn,
+  scopePicker,
 }: {
   scope: Scope;
   busy: boolean;
   onAction: StartPlugin;
+  activity: ActionFlow["activity"];
+  /** Profile part of the tracking key: the catalog profile, or "*" in the all-profiles view. */
+  trackProfile: string | null;
   /** All view: install state across profiles instead of the catalog profile's own flag. */
   installedIn?: (pluginId: string) => { n: number; total: number };
+  /** "Install to" choice, for CLIs with install scopes. */
+  scopePicker?: ReactNode;
 }) {
   const t = useToolboxText();
-  const { p } = useLook();
+  const { compact } = useLook();
   const caps = ECOSYSTEM_CAPS[scope.ecosystem];
+  const sorts = catalogSorts(scope.ecosystem);
   const [text, setText] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
+  const [sort, setSort] = useState<CatalogSort>(sorts[0] ?? "name");
   const search = useDebounced(text.trim(), 300);
-  const query = useCatalogPages(scope, search, caps.browse);
+  const query = useCatalogPages(scope, search, { category, sort }, caps.browse);
   const pages = query.data?.pages ?? [];
   const items = useMemo(() => pages.flatMap((page) => page.plugins), [pages]);
   const total = pages[0]?.total ?? items.length;
   const firstError = pages[0]?.error ?? null;
+  const facets = pages[0]?.categories ?? [];
   const catalogSource = scope.ecosystem === "paseo" ? pages[0]?.marketplaces[0]?.name : undefined;
+  // The opened plugin follows refetches (installed flag, update) while its sheet is up.
+  const [openKey, setOpenKey] = useState<{ key: string; snapshot: CatalogPlugin } | null>(null);
+  const keyOf = (plugin: CatalogPlugin) => `${plugin.marketplace ?? ""}:${plugin.id}`;
+  const open = openKey ? (items.find((x) => keyOf(x) === openKey.key) ?? openKey.snapshot) : null;
   const loadMore = () => {
     if (query.hasNextPage && !query.isFetchingNextPage && !query.isFetching) void query.fetchNextPage();
   };
   useOnScreenEnd(loadMore);
   // No CLI browsing (Antigravity: only inside agy's /plugin), so the section is the note alone.
   if (!caps.browse) return <Notice text={t.plugins.antigravityBrowseNote} />;
+
+  const card = (plugin: CatalogPlugin, detail: boolean) => (
+    <CatalogCard
+      key={keyOf(plugin)}
+      plugin={plugin}
+      detail={detail}
+      showMarketplace={!catalogSource}
+      installedIn={installedIn?.(plugin.id)}
+      canInstall={caps.plugin.includes("install")}
+      canUpdate={!installedIn && caps.plugin.includes("update")}
+      busy={busy}
+      activity={activity(trackKey(scope.ecosystem, trackProfile, plugin.id))}
+      onAction={
+        detail
+          ? (...args) => {
+              setOpenKey(null);
+              onAction(...args);
+            }
+          : onAction
+      }
+      onOpen={() => setOpenKey(detail ? null : { key: keyOf(plugin), snapshot: plugin })}
+    />
+  );
+
   return (
-    <View style={{ gap: 8 }}>
-      <TextInput
-        value={text}
-        onChangeText={setText}
-        placeholder={t.plugins.searchPlaceholder}
-        placeholderTextColor={p.idle}
-        autoCapitalize="none"
-        autoCorrect={false}
-        returnKeyType="search"
-        style={{
-          height: 36,
-          paddingHorizontal: 10,
-          borderRadius: RADIUS,
-          borderWidth: 1,
-          borderColor: p.guide,
-          color: p.foreground,
-          fontSize: 13,
-        }}
-      />
-      {query.isFetching ? <LoadingLine /> : null}
+    <View style={{ gap: 10 }}>
+      <View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "center", gap: 8 }}>
+        <SearchField value={text} onChange={setText} placeholder={t.plugins.searchPlaceholder} clearLabel={t.plugins.clearSearch} />
+        {sorts.length > 1 ? (
+          <Segmented<CatalogSort>
+            value={sort}
+            options={sorts.map((s) => ({ value: s, label: t.plugins.sort[s] }))}
+            onChange={setSort}
+          />
+        ) : null}
+      </View>
+      {scopePicker}
+      {facets.length > 0 || category ? (
+        <ChipRow>
+          <Chip label={t.plugins.filters.all} active={category === null} onPress={() => setCategory(null)} />
+          {/* The picked category stays even if a new search no longer lists it, so it can be undone. */}
+          {(!category || facets.includes(category) ? facets : [category, ...facets]).map((name) => (
+            <Chip key={name} label={name} active={category === name} onPress={() => setCategory(category === name ? null : name)} />
+          ))}
+        </ChipRow>
+      ) : null}
       {query.isError ? <Notice tone="danger" text={`${t.plugins.loadError}: ${t.diagnostic(errorText(query.error))}`} /> : null}
       {firstError ? <Notice tone="warning" text={t.diagnostic(firstError)} /> : null}
-      {query.isSuccess && !query.isFetching && items.length === 0 ? <EmptyState icon="Search" title={t.plugins.browseEmpty} /> : null}
-      {total > 0 ? (
-        <SectionLabel>{[catalogSource, t.plugins.catalogShown(items.length, total)].filter(Boolean).join(" · ")}</SectionLabel>
+      {total > 0 || query.isFetching ? (
+        <SectionLabel trailing={query.isFetching && !query.isFetchingNextPage ? <ActivityIndicator size="small" /> : null}>
+          {[catalogSource, total > 0 ? t.plugins.catalogCount(items.length, total) : null].filter(Boolean).join(" · ")}
+        </SectionLabel>
       ) : null}
-      {items.length > 0 ? (
-        <Card>
-          {items.map((plugin, i) => (
-            <CatalogRow
-              key={`${plugin.marketplace ?? ""}:${plugin.id}`}
-              plugin={plugin}
-              showMarketplace={!catalogSource}
-              installedIn={installedIn?.(plugin.id)}
-              canInstall={caps.plugin.includes("install")}
-              first={i === 0}
-              busy={busy}
-              onAction={onAction}
-            />
-          ))}
-        </Card>
+      {query.isPending ? <LoadingLine /> : null}
+      {query.isSuccess && !query.isFetching && items.length === 0 ? (
+        <EmptyState
+          icon="SearchX"
+          title={t.plugins.browseEmpty}
+          action={
+            text || category ? (
+              <Button
+                small
+                label={t.plugins.clearFilters}
+                onPress={() => {
+                  setText("");
+                  setCategory(null);
+                }}
+              />
+            ) : undefined
+          }
+        />
       ) : null}
+      {items.length > 0 ? <CardGrid columns={compact ? 1 : 2}>{items.map((plugin) => card(plugin, false))}</CardGrid> : null}
       {query.hasNextPage ? (
         query.isFetchingNextPage ? (
           <LoadingLine />
@@ -484,58 +754,88 @@ function BrowseList({
           <Button label={t.plugins.loadMore(Math.min(CATALOG_PAGE, total - items.length))} onPress={loadMore} />
         )
       ) : null}
+      {open ? card(open, true) : null}
     </View>
   );
 }
 
-function CatalogRow({
+function CatalogCard({
   plugin,
   showMarketplace,
   canInstall,
-  first,
+  canUpdate,
   busy,
+  activity,
   onAction,
   installedIn,
+  onOpen,
+  detail,
 }: {
   installedIn?: { n: number; total: number };
   showMarketplace: boolean;
   plugin: CatalogPlugin;
   canInstall: boolean;
-  first: boolean;
+  canUpdate: boolean;
   busy: boolean;
+  activity: Activity | null;
   onAction: StartPlugin;
+  onOpen(): void;
+  detail: boolean;
 }) {
   const t = useToolboxText();
-  const meta = [showMarketplace ? plugin.marketplace : null, plugin.categories.join(", ")].filter(Boolean).join(" · ");
+  const m = catalogMeta(plugin);
+  const act = (action: PluginAction) => onAction(action, plugin.id, plugin.name, plugin.marketplace);
+  const installed = installedIn ? installedIn.n > 0 : plugin.installed;
+  const everywhere = installedIn ? installedIn.n >= installedIn.total : plugin.installed;
+  const control = (
+    <StateControl
+      state={{ installed, updateTo: m.updateTo, activity }}
+      installLabel={installedIn && installed && !everywhere ? t.plugins.installToRest : undefined}
+      onInstall={canInstall && !everywhere ? () => act("install") : null}
+      onUpdate={canUpdate ? () => act("update") : null}
+      busy={busy}
+      small={!detail}
+    />
+  );
+  const badges = installedIn ? (
+    installedIn.n > 0 ? <Badge label={t.plugins.installedIn(installedIn.n, installedIn.total)} tone="success" /> : null
+  ) : m.updateTo && installed ? (
+    <Badge label={t.plugins.updateAvailable} tone="warning" />
+  ) : null;
+  if (detail) {
+    return (
+      <PluginDetail
+        info={{
+          name: plugin.name,
+          meta: m,
+          description: plugin.description,
+          marketplace: plugin.marketplace,
+          source: plugin.source,
+          errors: activity?.state === "failed" && activity.error ? [t.diagnostic(activity.error)] : [],
+        }}
+        control={control}
+        actions={badges}
+        onClose={onOpen}
+      />
+    );
+  }
+  const failure = activity?.state === "failed" && activity.error ? t.diagnostic(activity.error) : null;
   return (
-    <ListRow
-      first={first}
-      title={plugin.name}
-      badge={
-        installedIn ? (
-          installedIn.n > 0 ? (
-            <Badge label={t.plugins.installedIn(installedIn.n, installedIn.total)} tone="success" />
-          ) : undefined
-        ) : plugin.installed ? (
-          <Badge label={t.plugins.installedBadge} tone="success" />
-        ) : undefined
-      }
-      meta={meta || null}
-      detail={plugin.description}
-      actions={
-        (installedIn ? installedIn.n >= installedIn.total : plugin.installed) || !canInstall ? undefined : (
-          <Button
-            small
-            icon="Download"
-            label={t.plugins.actions.install}
-            onPress={() => onAction("install", plugin.id, plugin.name, plugin.marketplace)}
-            disabled={busy}
-          />
-        )
-      }
+    <PluginCard
+      layout="tile"
+      name={plugin.name}
+      meta={m}
+      subtitle={[m.author, showMarketplace ? plugin.marketplace : null, m.version ? versionText(m.version) : null].filter(Boolean).join(" · ") || null}
+      description={failure ?? plugin.description}
+      descriptionTone={failure ? "danger" : "muted"}
+      badges={badges}
+      control={control}
+      onOpen={onOpen}
     />
   );
 }
+
+// ---- Marketplaces ----------------------------------------------------------------------------
 
 function MarketplaceList({
   scope,
@@ -594,13 +894,14 @@ function MarketplaceList({
               first={i === 0}
               leading={<ProviderGlyph provider={scope.ecosystem} size={13} />}
               title={m.name}
+              badge={m.official ? <Badge label={t.plugins.official} /> : undefined}
               meta={[m.source, m.pluginCount === null ? null : t.plugins.pluginCount(m.pluginCount)].filter(Boolean).join(" · ") || null}
               actions={
                 <>
                   {can.includes("update") ? (
                     <Button small icon="RefreshCw" label={t.plugins.actions.update} onPress={() => onAction("update", m.name)} disabled={busy} />
                   ) : null}
-                  {can.includes("remove") ? (
+                  {can.includes("remove") && !m.official ? (
                     <Button small icon="Trash2" label={t.plugins.actions.remove} onPress={() => onAction("remove", m.name)} disabled={busy} />
                   ) : null}
                 </>
@@ -615,15 +916,8 @@ function MarketplaceList({
 
 // ---- All profiles of one kind ----------------------------------------------------------------
 
-/** One plugin id across the profiles of one kind. */
-interface PluginRow {
-  id: string;
-  name: string;
-  marketplace: string | null;
-  description: string | null;
-  /** profile id -> that profile's entry. */
-  entries: Map<string, InstalledPlugin>;
-}
+/** Profile part of the tracking key for actions run across profiles. */
+const ALL_TRACK = "*";
 
 function pluginColor(t: Strings, p: ReturnType<typeof useLook>["p"], plugin: InstalledPlugin): { color: string; label: string } {
   if (plugin.error) return { color: p.danger, label: t.strip.error };
@@ -684,14 +978,17 @@ function AllPlugins({
         name: plugin.name,
         marketplace: plugin.marketplace,
         description: plugin.description,
+        source: plugin.source,
         entries: new Map<string, InstalledPlugin>(),
       };
       rows.set(plugin.id, row);
       row.entries.set(profile.id, plugin);
     }
   });
-  const sorted = [...rows.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
+  const allRows = [...rows.values()];
+  const view = useInstalledView(allRows, rowFacts);
   const notInstalled = profiles.filter((x) => x.auth.state === "not_installed");
+  const [open, setOpen] = useState<string | null>(null);
 
   // Browse needs one profile's catalog; it is named on screen, never picked silently.
   const catalogProfile = profiles.find((x) => x.auth.state === "logged_in") ?? profiles.find(bulkSelectable) ?? null;
@@ -727,6 +1024,7 @@ function AllPlugins({
       destructive: action === "uninstall",
       bringsCode: action === "install" || action === "update" || action === "enable",
       pick: true,
+      track: { key: trackKey(ecosystem, ALL_TRACK, pluginId), kind: ACTIVITY_OF[action] },
       targets: profiles.map((profile): ActionTarget => {
         const input = { ecosystem, profileId: profile.id, cwd, action, pluginId, marketplace };
         const ok = bulkSelectable(profile) && eligible(profile);
@@ -761,6 +1059,101 @@ function AllPlugins({
     startBulk(action, pluginId, name, marketplace, (x) => loaded.has(x.id) && !rows.get(pluginId)?.entries.has(x.id), t.targets.noteHas);
 
   const can = caps.plugin;
+
+  const rowCard = (row: PluginRow, detail: boolean) => {
+    const entries = [...row.entries.values()];
+    const has = (pred: (x: InstalledPlugin) => boolean) => entries.some(pred);
+    const missing = profiles.some((x) => bulkSelectable(x) && loaded.has(x.id) && !row.entries.has(x.id));
+    const updates = entries.filter((x) => x.updateTo);
+    const versions = [...new Set(entries.map((x) => x.version).filter((v): v is string => !!v))].map(versionText);
+    const errorsOf = profiles.flatMap((profile) => {
+      const error = row.entries.get(profile.id)?.error;
+      return error ? [`${shortLabel(t, profile)}: ${t.diagnostic(error)}`] : [];
+    });
+    const activity = flow.activity(trackKey(ecosystem, ALL_TRACK, row.id));
+    const running = activity?.state === "running";
+    // Store fields from the first profile that has them (they describe the plugin, not the install).
+    const first = entries[0];
+    const m = first ? { ...installedMeta(first), version: versions.length === 1 ? (versions[0] ?? null) : null, updateTo: updates[0]?.updateTo ?? null } : null;
+    if (!m) return null;
+    const act = (action: PluginAction) => {
+      if (detail) setOpen(null);
+      startForRow(action, row);
+    };
+    const control = (
+      <StateControl
+        state={{ installed: true, updateTo: updates.length > 0 ? (updates[0]?.updateTo ?? null) : null, activity }}
+        onInstall={null}
+        onUpdate={can.includes("update") && updates.length > 0 ? () => act("update") : null}
+        busy={flow.busy}
+        small={!detail}
+        hideInstalled={!detail}
+      />
+    );
+    const actions = running ? null : (
+      <>
+        {can.includes("install") && missing ? (
+          <Button small={!detail} icon="CopyPlus" label={t.plugins.installToRest} onPress={() => act("install")} disabled={flow.busy} />
+        ) : null}
+        {can.includes("enable") && has((x) => x.enabled === false) ? (
+          <Button small={!detail} icon="Power" label={t.plugins.actions.enable} onPress={() => act("enable")} disabled={flow.busy} />
+        ) : null}
+        {can.includes("disable") && has((x) => x.enabled === true) ? (
+          <Button small={!detail} icon="PowerOff" label={t.plugins.actions.disable} onPress={() => act("disable")} disabled={flow.busy} />
+        ) : null}
+        {can.includes("uninstall") ? (
+          <Button small={!detail} icon="Trash2" label={t.plugins.actions.uninstall} onPress={() => act("uninstall")} disabled={flow.busy} />
+        ) : null}
+      </>
+    );
+    const strip = <ProfileStrip items={profiles.map((profile) => ({ profile, presence: presence(profile, row) }))} />;
+    const scopes = [...new Set(entries.map((x) => pluginScopeLabel(t, ecosystem, x.scope)))];
+    const failure = activity?.state === "failed" && activity.error ? t.diagnostic(activity.error) : null;
+    if (detail) {
+      return (
+        <PluginDetail
+          info={{
+            name: row.name,
+            meta: m,
+            description: row.description,
+            marketplace: row.marketplace,
+            source: row.source,
+            scope: scopes.join(", "),
+            errors: [...(failure ? [failure] : []), ...errorsOf],
+          }}
+          control={control}
+          actions={actions}
+          extra={strip}
+          onClose={() => setOpen(null)}
+        />
+      );
+    }
+    return (
+      <PluginCard
+        key={row.id}
+        layout="row"
+        name={row.name}
+        meta={m}
+        subtitle={[versions.join(", "), m.author, row.marketplace].filter(Boolean).join(" · ") || null}
+        description={failure ?? (errorsOf.length > 0 ? errorsOf.join("\n") : row.description)}
+        descriptionTone={failure || errorsOf.length > 0 ? "danger" : "muted"}
+        badges={
+          <>
+            {scopes.map((label) => (
+              <Badge key={label} label={label} />
+            ))}
+            {updates.length > 0 ? <Badge label={t.plugins.updateAvailable} tone="warning" /> : null}
+          </>
+        }
+        below={<View style={{ marginTop: 4 }}>{strip}</View>}
+        control={control}
+        actions={actions}
+        onOpen={() => setOpen(row.id)}
+      />
+    );
+  };
+  const opened = open ? rows.get(open) ?? null : null;
+
   return (
     <View style={{ gap: 12 }}>
       <Segmented<Section> value={section} options={sections.map((s) => ({ value: s, label: t.plugins.sections[s] }))} onChange={setSection} />
@@ -771,62 +1164,11 @@ function AllPlugins({
           {errors.map((e) => (
             <Notice key={e.profile.id} tone="warning" text={`${e.profile.label}: ${e.text}`} />
           ))}
-          {loading.length === 0 && sorted.length === 0 ? <EmptyState icon="Package" title={t.plugins.installedEmpty} /> : null}
-          {sorted.length > 0 ? (
-            <Card>
-              {sorted.map((row, i) => {
-                const entries = [...row.entries.values()];
-                const has = (pred: (x: InstalledPlugin) => boolean) => entries.some(pred);
-                const missing = profiles.some((x) => bulkSelectable(x) && loaded.has(x.id) && !row.entries.has(x.id));
-                const updates = entries.filter((x) => x.updateTo);
-                const versions = [...new Set(entries.map((x) => x.version).filter(Boolean))].map((v) => `v${v}`);
-                const errorsOf = profiles
-                  .flatMap((profile) => {
-                    const error = row.entries.get(profile.id)?.error;
-                    return error ? [`${shortLabel(t, profile)}: ${t.diagnostic(error)}`] : [];
-                  });
-                return (
-                  <ListRow
-                    key={row.id}
-                    first={i === 0}
-                    title={row.name}
-                    badge={
-                      <>
-                        {[...new Set(entries.map((x) => pluginScopeLabel(t, ecosystem, x.scope)))].map((label) => (
-                          <Badge key={label} label={label} />
-                        ))}
-                        {updates.length > 0 ? <Badge label={t.plugins.updateAvailable} tone="warning" /> : null}
-                      </>
-                    }
-                    meta={[versions.join(", "), row.marketplace].filter(Boolean).join(" · ") || null}
-                    detail={errorsOf.length > 0 ? errorsOf.join("\n") : row.description}
-                    detailTone={errorsOf.length > 0 ? "danger" : "muted"}
-                    below={<ProfileStrip items={profiles.map((profile) => ({ profile, presence: presence(profile, row) }))} />}
-                    actions={
-                      <>
-                        {can.includes("enable") && has((x) => x.enabled === false) ? (
-                          <Button small label={t.plugins.actions.enable} onPress={() => startForRow("enable", row)} disabled={flow.busy} />
-                        ) : null}
-                        {can.includes("disable") && has((x) => x.enabled === true) ? (
-                          <Button small label={t.plugins.actions.disable} onPress={() => startForRow("disable", row)} disabled={flow.busy} />
-                        ) : null}
-                        {/* Only profiles with a known newer version get an update. */}
-                        {can.includes("update") && updates.length > 0 ? (
-                          <Button small icon="RefreshCw" label={t.plugins.actions.update} onPress={() => startForRow("update", row)} disabled={flow.busy} />
-                        ) : null}
-                        {can.includes("install") && missing ? (
-                          <Button small icon="CopyPlus" label={t.plugins.installToRest} onPress={() => startForRow("install", row)} disabled={flow.busy} />
-                        ) : null}
-                        {can.includes("uninstall") ? (
-                          <Button small icon="Trash2" label={t.plugins.actions.uninstall} onPress={() => startForRow("uninstall", row)} disabled={flow.busy} />
-                        ) : null}
-                      </>
-                    }
-                  />
-                );
-              })}
-            </Card>
-          ) : null}
+          {loading.length === 0 && allRows.length === 0 ? <EmptyState icon="Package" title={t.plugins.installedEmpty} /> : null}
+          {allRows.length > 0 ? <InstalledToolbar view={view} /> : null}
+          {allRows.length > 0 && view.shown.length === 0 ? <EmptyState icon="SearchX" title={t.plugins.filterEmpty} /> : null}
+          {view.shown.length > 0 ? <View style={{ gap: 8 }}>{view.shown.map((row) => rowCard(row, false))}</View> : null}
+          {opened ? rowCard(opened, true) : null}
         </View>
       ) : null}
       {section === "browse" ? (
@@ -837,6 +1179,8 @@ function AllPlugins({
               scope={{ ecosystem, profileId: catalogProfile.id, cwd }}
               busy={flow.busy}
               onAction={browseInstall}
+              activity={flow.activity}
+              trackProfile={ALL_TRACK}
               installedIn={(id) => ({
                 n: rows.get(id)?.entries.size ?? 0,
                 total: listed.length,

@@ -59,17 +59,21 @@ In an agent chat, `/mcp` and `/plugins` (or `/plugin`) open full screens, and th
 
 - `/mcp` lists the MCP servers of a profile with their scope and status, and adds, removes or signs in to servers. `/mcp <profile>` opens another profile than the chat's own.
 - `/plugins` has tabs for Paseo, Claude, Codex and Antigravity. It lists installed plugins and marketplace catalogs, and installs, removes, enables, disables and updates plugins. `/plugins claude` opens a tab directly.
+- Catalogs can be searched, filtered by category and sorted by name, install count or last update where the source reports them. Cards show the author, version, install count and icon when the catalog lists them.
+- Besides catalogs, plugins can be installed from a source you enter. Paseo plugins come from a git repository (an https URL or GitHub `owner/repo`, with an optional branch, tag or commit and a folder inside the repository), an npm package, or a local folder on the daemon host. Antigravity plugins come from a GitHub https URL or a local folder. Claude Code plugins come from a marketplace that has not been added yet (GitHub `owner/repo`, a git or https URL, or a local path), and Claude Code installs can target the user, project or local scope.
 - Every profile works separately. A custom provider such as `claude-work` with its own config directory is its own profile, so each account has its own servers and plugins. When a tab has several profiles, you can run one change on several of them at once.
-- Every change shows a confirmation first, listing the exact command for each profile, its source, and any warnings. Nothing changes until you confirm.
+- Every change shows a confirmation first, listing the exact command for each profile, its source, and any warnings. Nothing changes until you confirm. Adding, removing and updating marketplaces is previewed the same way.
+- Before a Paseo plugin is installed from a source, the preview pins it: a git branch or tag is resolved to one commit and an npm dist-tag to one exact version, and the install uses that commit or version. The confirmed preview can be used once, within 10 minutes; after that, or if the source is changed, a new preview is needed.
+- Entered sources are checked before anything runs. Values may not start with `-`, URLs must use https and may not contain a user name or password, git URLs may not have a query or fragment, local paths must be absolute and exist, and a folder inside a repository may not contain `..`. URLs are shown without credentials, query or fragment.
 
 Support differs by CLI:
 
 | | MCP servers | Plugins |
 | --- | --- | --- |
-| Claude Code | List, add, remove | Catalog, install, remove, enable, disable, update; add, remove and update marketplaces |
+| Claude Code | List, add, remove | Catalog, install, remove, enable, disable, update in user, project or local scope; install from a marketplace not added yet; add, remove and update marketplaces |
 | Codex | List, add, remove (user scope); shows the sign-in command to run in a terminal | Catalog, install, remove; add, remove and update marketplaces |
-| Antigravity | List, add, remove by editing its documented `mcp_config.json` | Installed plugins, install, remove, enable, disable; browsing happens in Antigravity itself |
-| Paseo | — | Registry catalog, installed plugins, install, remove, enable, disable, update |
+| Antigravity | List, add, remove by editing its documented `mcp_config.json` | Installed plugins, install, remove, enable, disable; install from a GitHub https URL or a local folder; browsing happens in Antigravity itself |
+| Paseo | None | Registry catalog, installed plugins, install, remove, enable, disable, update; install from a git repository, an npm package or a local folder |
 
 The toolbox screens use the same nine languages as the sidebar, following the app language.
 
@@ -84,14 +88,17 @@ Atrium runs on the daemon host with your user's permissions. It sends nothing to
 Network requests made by the plugin itself:
 
 - For each additional Claude account, the account's OAuth access token is sent to `https://api.anthropic.com/api/oauth/usage` to read its limits. Redirects are refused, and the token is not logged, stored or returned to the app.
-- The Paseo plugins tab downloads the public catalog from `https://plugins.paseo.sh/index.json`.
+- The Paseo plugins tab downloads the public catalog from `https://plugins.paseo.sh/index.json`. Plugin icons listed there are loaded by the app from their https addresses.
+- When a Paseo plugin is installed from an npm package without an exact version, the preview asks `https://registry.npmjs.org` which version the dist-tag (or `latest`) points to.
 
 The Panes screen reads agent timelines and parent links, and sends the messages you type, through the Paseo daemon's own API on the host. It makes no network requests of its own.
 
 Commands it runs on the daemon host (as separate processes, without a shell):
 
 - Each profile's own CLI with that profile's environment: `claude` (`auth status`, `mcp`, `plugin` and `plugin marketplace` commands), `codex` (`login status`, `mcp`, `plugin` and `plugin marketplace` commands) and `agy` (`--version`, `plugin` commands). Listing commands run when a screen opens; changes run only after you confirm. These CLIs may contact their own services, for example to check MCP servers or download plugins.
-- The `paseo` CLI to list projects, remove a project, and list, install, update, enable, disable and remove Paseo plugins.
+- The `paseo` CLI to list projects, remove a project, and list, install, update, enable, disable and remove Paseo plugins (its `plugin ls`, `plugin install`, `plugin update`, `plugin enable`, `plugin disable` and `plugin remove` commands). When the daemon sets `PASEO_HOME`, these commands pass `--home` with it, so they act on the daemon the plugin runs in; otherwise they use the CLI's default home. Git and npm sources are fetched by the `paseo` CLI.
+- For Claude Code plugins, `claude plugin install`, `uninstall`, `enable`, `disable` and `update` (with `-s` for the chosen scope, and `--marketplace` when installing from a marketplace not added yet) and `claude plugin marketplace add`, `remove` and `update`. For Codex, `codex plugin add` and `remove` and `codex plugin marketplace add`, `remove` and `upgrade`. For Antigravity, `agy plugin install`, `uninstall`, `enable` and `disable`. Each name, source and option value is passed as its own argument.
+- `git ls-remote` against the entered repository, when a Paseo plugin is installed from git with a branch, tag or no ref, to resolve it to one commit for the preview. It runs with terminal prompts turned off.
 - `git` (`rev-parse`, `worktree list`, `symbolic-ref` and `for-each-ref`) in each session's folder to show its worktree and branch in the sidebar and to find the default branch. These are read-only, run against the session's folder rather than any `GIT_DIR` or similar git variables set for the daemon, and each folder's answer is reused for a few seconds.
 - On macOS, `/usr/bin/security find-generic-password` to read an additional Claude account's login from the Keychain.
 
@@ -100,12 +107,18 @@ Files it reads:
 - `~/.paseo/config.json` (or `$PASEO_HOME/config.json`) to find the configured providers.
 - For each additional Claude account: `.claude.json` in its config directory (email, organization, plan), session logs under `projects/` (token counts only), and, outside macOS, `.credentials.json` for the login.
 - For each additional Codex account: `auth.json` (email and plan, decoded on the host) and session logs under `sessions/` (token counts and limit snapshots).
-- For the toolbox: Claude's `.claude.json`, `.mcp.json` in the chat's folder and the plugin marketplace files in the Claude config directory (names only); `.codex/config.toml` in the chat's folder (names only); Antigravity's `settings.json` and `mcp_config.json` files.
+- For the toolbox: Claude's `.claude.json` and `.mcp.json` in the chat's folder (names only); `plugins/known_marketplaces.json` in the Claude config directory and each added marketplace's `.claude-plugin/marketplace.json` (plugin names, versions, authors, homepages, categories and licenses); `.codex/config.toml` in the chat's folder (names only); Antigravity's `settings.json` and `mcp_config.json` files.
 
 Files it writes:
 
 - `~/.paseo/atrium/project-order.json` (or under `$PASEO_HOME`) for the project and session order. If that file does not exist yet, an order saved by an earlier version in `nested-agents/project-order.json` in the same folder is copied there once; the old file is read but left in place.
 - The `~/.paseo-chat` folder for General chats.
 - Antigravity's `~/.gemini/config/mcp_config.json` or `<project>/.agents/mcp_config.json`, only when you add or remove an Antigravity MCP server.
+
+Files the CLIs write when you confirm a plugin change (the plugin itself does not edit them):
+
+- Claude Code: user scope changes `settings.json` in the profile's config directory, project scope the chat folder's `.claude/settings.json`, and local scope the chat folder's `.claude/settings.local.json`. Installing from a marketplace not added yet also adds that marketplace to the profile's user settings. Plugin files go to the `plugins` folder in the profile's config directory.
+- Paseo: plugins installed from git or npm are stored in the plugin storage under the daemon's home, and a local folder is used where it is.
+- Codex and Antigravity: each CLI stores plugins in its own locations.
 
 Account emails appear on usage cards and in the toolbox's profile status. MCP environment values and headers are not sent to the app, and the toolbox masks tokens and other secrets it finds in command output.

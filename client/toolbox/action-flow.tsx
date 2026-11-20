@@ -2,13 +2,14 @@
 // confirm) -> one confirmation modal with each profile's exact command, source and warnings ->
 // run the profiles one after another, past failures -> per-profile results and, when needed, a
 // reload of each touched profile's idle sessions.
-import { Fragment, useCallback, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useReducer, useRef, useState, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { usePaseo } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import type { ActionPreview, CommandResult } from "../../shared/toolbox/types";
 import { PASEO_PLUGIN_TRUST_WARNING } from "../../shared/toolbox/warnings";
+import { trackReducer, type ActivityKind, type TrackEvent, type TrackState } from "./store-logic";
 import { useToolboxText } from "./strings";
 import { Button, CodeBlock, LoadingLine, Notice, ProviderGlyph, TargetPicker, errorText, useLook } from "./ui";
 
@@ -24,6 +25,22 @@ interface ActionBase {
   invalidate: readonly QueryKey[];
   /** Values never shown on screen (env and header values), masked in every profile's output. */
   secrets?: readonly string[];
+  /** Lets a list show this action's progress on the item it is about (see `ActionFlow.activity`). */
+  track?: { key: string; kind: ActivityKind };
+}
+
+export type { ActivityKind };
+
+/** A tracked action that is running, or that failed and can be retried from the item itself. */
+export interface Activity {
+  kind: ActivityKind;
+  state: "running" | "failed";
+  /** First error of a failed run. */
+  error: string | null;
+  /** Starts the same action again (through preview and confirmation). */
+  retry(): void;
+  /** Forgets a failure. */
+  dismiss(): void;
 }
 
 /** One action on one profile (or on Paseo). */
@@ -88,6 +105,8 @@ export interface ActionFlow {
   start(action: ToolboxAction): void;
   startBulk(action: BulkAction): void;
   busy: boolean;
+  /** Progress of the tracked action about this item, if any. */
+  activity(key: string): Activity | null;
   element: ReactNode;
 }
 
@@ -106,7 +125,14 @@ function fromSingle(action: ToolboxAction): Flow {
 
 export function useActionFlow(hostId: string): ActionFlow {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const t = useToolboxText();
   const [phase, setPhase] = useState<Phase>({ kind: "closed" });
+  // The modal can be put away while a run goes on; the item shows the progress instead.
+  const [hidden, setHidden] = useState(false);
+  const hiddenRef = useRef(false);
+  hiddenRef.current = hidden;
+  const [tracked, track] = useReducer(trackReducer<Flow>, {} as TrackState<Flow>) as [TrackState<Flow>, (event: TrackEvent<Flow>) => void];
   // Bumped on every start/close so a late preview answer never reopens a closed modal.
   const token = useRef(0);
 
@@ -135,6 +161,7 @@ export function useActionFlow(hostId: string): ActionFlow {
 
   const begin = useCallback(
     (action: Flow) => {
+      setHidden(false);
       if (action.pick) {
         ++token.current;
         const selected = action.targets.filter((x) => x.selectable && x.preselected).map((x) => x.id);
@@ -150,9 +177,14 @@ export function useActionFlow(hostId: string): ActionFlow {
   const startBulk = useCallback((action: BulkAction) => begin({ ...action, single: false }), [begin]);
 
   const close = useCallback(() => {
+    // A running action cannot be stopped; closing puts its modal away until it ends.
+    if (phase.kind === "running") {
+      setHidden(true);
+      return;
+    }
     token.current++;
-    setPhase((current) => (current.kind === "running" ? current : { kind: "closed" }));
-  }, []);
+    setPhase({ kind: "closed" });
+  }, [phase.kind]);
 
   const picked = useCallback(() => {
     if (phase.kind !== "pick") return;
@@ -168,6 +200,8 @@ export function useActionFlow(hostId: string): ActionFlow {
     if (toRun.length === 0) return;
     const mine = ++token.current;
     setPhase({ kind: "running", action, items, done: [] });
+    const tracking = action.track;
+    if (tracking) track({ type: "start", key: tracking.key, kind: tracking.kind, flow: action });
     (async () => {
       const done: TargetResult[] = [];
       // One after another: CLIs of one kind share caches and lock files; a failure stops nothing.
@@ -186,12 +220,49 @@ export function useActionFlow(hostId: string): ActionFlow {
       }
       await Promise.all(action.invalidate.map((queryKey) => queryClient.invalidateQueries({ queryKey }))).catch(() => {});
       action.onResults?.(done);
-      if (token.current === mine) setPhase({ kind: "result", action, results: done, skipped });
+      const failed = done.find((d) => !d.result.ok);
+      if (tracking) {
+        track(
+          failed
+            ? { type: "fail", key: tracking.key, kind: tracking.kind, error: failed.result.error ?? t.flow.failed, flow: action }
+            : { type: "done", key: tracking.key },
+        );
+      }
+      if (token.current !== mine) return;
+      const quiet = !failed && skipped.length === 0 && done.every((d) => !d.result.needsReload);
+      if (hiddenRef.current && quiet) {
+        // Nothing left to read or do: say so and stay out of the way.
+        toast.show(t.flow.doneToast(action.subject), { variant: "success" });
+        setPhase({ kind: "closed" });
+        setHidden(false);
+        return;
+      }
+      // A failure, skipped profiles or a reload to offer: bring the result back.
+      setHidden(false);
+      setPhase({ kind: "result", action, results: done, skipped });
     })();
-  }, [phase, queryClient]);
+  }, [phase, queryClient, t, toast]);
+
+  const activity = useCallback(
+    (key: string): Activity | null => {
+      const entry = tracked[key];
+      if (!entry) return null;
+      return {
+        kind: entry.kind,
+        state: entry.state,
+        error: entry.error,
+        retry: () => {
+          track({ type: "retry", key });
+          begin(entry.flow);
+        },
+        dismiss: () => track({ type: "dismiss", key }),
+      };
+    },
+    [tracked, begin],
+  );
 
   const element =
-    phase.kind === "closed" ? null : (
+    phase.kind === "closed" || hidden ? null : (
       <FlowModal
         phase={phase}
         hostId={hostId}
@@ -206,6 +277,7 @@ export function useActionFlow(hostId: string): ActionFlow {
     start,
     startBulk,
     busy: phase.kind === "checking" || phase.kind === "running",
+    activity,
     element,
   };
 }
@@ -403,7 +475,11 @@ function ConfirmBody({
       {!action.single && toRun.length > 1 ? <Text style={{ color: p.muted, fontSize: 12 }}>{t.flow.sequential}</Text> : null}
       {action.bringsCode && !hasPaseoTrustWarning ? <Notice tone="warning" text={t.flow.unsandboxed} /> : null}
       <Footer>
-        <Button label={t.common.cancel} onPress={onClose} disabled={running} />
+        {running ? (
+          <Button label={t.flow.background} onPress={onClose} />
+        ) : (
+          <Button label={t.common.cancel} onPress={onClose} />
+        )}
         <Button
           label={running ? t.common.running : action.single ? t.common.run : t.flow.runOn(toRun.length)}
           tone={action.destructive ? "danger" : "primary"}

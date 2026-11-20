@@ -181,7 +181,104 @@ export default {
       marketplaceRemove: "마켓플레이스 제거",
       marketplaceUpdate: "마켓플레이스 업데이트"
     },
-    catalogShown: "{{total}}개 중 {{shown}}개 표시 · 이름순",
+    catalogCount: "{{total}}개 중 {{shown}}개 표시",
+    searchInstalled: "설치된 플러그인 검색",
+    featured: "추천",
+    official: "공식",
+    installScope: "설치 범위",
+    scopeNeedsProject: "프로젝트 범위는 프로젝트가 있어야 쓸 수 있습니다. 에이전트에서 /plugins를 열어 선택하세요.",
+    source: {
+      button: "출처에서 설치",
+      title: "출처에서 설치",
+      kind: "출처",
+      kinds: {
+        git: "Git",
+        npm: "npm",
+        local: "로컬 폴더",
+        marketplace: "마켓플레이스"
+      },
+      valueLabel: {
+        git: "저장소",
+        npm: "패키지",
+        local: "폴더 경로",
+        marketplace: "마켓플레이스 출처"
+      },
+      valuePlaceholder: {
+        git: "owner/repo 또는 https://…",
+        npm: "@scope/package",
+        local: "/absolute/path/to/plugin",
+        marketplace: "owner/repo, URL 또는 경로"
+      },
+      invalidValue: {
+        git: "공백 없는 저장소 주소를 입력하세요",
+        npm: "올바른 npm 패키지 이름을 입력하세요",
+        local: "절대 경로를 입력하세요",
+        marketplace: "공백 없는 마켓플레이스 출처를 입력하세요"
+      },
+      plugin: "플러그인 이름",
+      pluginPlaceholder: "my-plugin",
+      ref: "브랜치, 태그 또는 커밋 (선택)",
+      refPlaceholder: "main",
+      refNote: "전체 커밋 SHA를 입력하면 해당 리비전으로 고정해 설치합니다.",
+      version: "버전 또는 태그 (선택)",
+      versionPlaceholder: "latest",
+      path: "출처 안의 플러그인 폴더 (선택)",
+      pathPlaceholder: "plugins/my-plugin",
+      review: "명령 확인"
+    },
+    installs: "설치 {{n}}회",
+    clearSearch: "검색어 지우기",
+    clearFilters: "검색과 필터 지우기",
+    filterEmpty: "검색과 필터에 맞는 플러그인이 없습니다",
+    updateTo: "{{version}} 버전으로 업데이트",
+    filters: {
+      all: "전체",
+      updates: "업데이트",
+      errors: "오류",
+      enabled: "켜짐",
+      disabled: "꺼짐"
+    },
+    sort: {
+      name: "이름순",
+      attention: "확인 필요",
+      updated: "최근 업데이트순",
+      installs: "설치 많은 순"
+    },
+    state: {
+      dismiss: "닫기",
+      running: {
+        install: "설치 중…",
+        update: "업데이트 중…",
+        remove: "제거 중…",
+        enable: "켜는 중…",
+        disable: "끄는 중…"
+      },
+      failed: {
+        install: "설치하지 못했습니다",
+        update: "업데이트하지 못했습니다",
+        remove: "제거하지 못했습니다",
+        enable: "켜지 못했습니다",
+        disable: "끄지 못했습니다"
+      }
+    },
+    detail: {
+      title: "플러그인 상세 정보",
+      open: "상세 보기",
+      noDescription: "설명 없음",
+      by: "{{author}} 제작",
+      author: "작성자",
+      version: "버전",
+      installedVersion: "설치된 버전",
+      latestVersion: "최신 버전",
+      updateTo: "업데이트할 버전",
+      scope: "범위",
+      marketplace: "마켓플레이스",
+      source: "출처",
+      homepage: "홈페이지 열기",
+      installs: "설치 수",
+      updated: "최근 업데이트",
+      license: "라이선스"
+    },
     loadMore: "{{n}}개 더 보기",
     antigravityBrowseNote: "Antigravity 마켓플레이스는 agy 안에서만 둘러볼 수 있습니다(/plugin). 아래는 이 도구가 확인한 항목입니다.",
     marketplaceAddWarning: "이 출처의 플러그인 목록을 가져옵니다.",
@@ -226,7 +323,9 @@ export default {
     nowRunning: "실행 중",
     summary: "성공 {{ok}}",
     summarySkipped: "성공 {{ok}} · 실패 {{failed}} · 건너뜀 {{skipped}}",
-    reloadFor: "{{label}}: 열린 세션은 다시 불러와야 변경을 반영합니다."
+    reloadFor: "{{label}}: 열린 세션은 다시 불러와야 변경을 반영합니다.",
+    background: "백그라운드에서 계속",
+    doneToast: "{{subject}}: 완료했습니다"
   },
   diagnostic: {
     agyUpdate: "agy CLI에는 문서화된 플러그인 업데이트 명령이 없습니다.",
@@ -242,10 +341,10 @@ export default {
     projectRequired: "프로젝트 디렉터리를 선택하거나 user 범위를 지정하세요.",
     unknownScope: "알 수 없는 범위: {{detail}}",
     unsupportedCli: "CLI에서 지원하지 않는 작업입니다 ({{detail}}).",
-    timeout: "명령의 응답 시간이 초과되었습니다.",
+    timeout: "명령 실행 시간이 초과되었습니다.",
     outputLimit: "명령 출력이 크기 제한을 초과했습니다.",
     exitCode: "명령이 실패했습니다 (종료 코드 {{detail}}).",
-    invalidResponse: "{{detail}}에서 유효하지 않은 응답을 반환했습니다.",
+    invalidResponse: "{{detail}}에서 올바르지 않은 응답이 돌아왔습니다.",
     registryHttp: "Paseo 레지스트리에서 HTTP {{detail}} 응답을 반환했습니다.",
     invalidName: "유효한 MCP 서버 이름을 입력하세요.",
     codexScope: "Codex MCP 변경은 이 프로필의 전역 설정에 적용됩니다.",
@@ -257,7 +356,7 @@ export default {
     claudeOAuth: "{{id}} 프로필로 Claude 터미널을 열고 /mcp에서 {{name}} 인증을 완료하세요. --no-browser를 사용하면 리디렉션 URL을 입력해야 합니다.",
     agyOAuth: "agy의 /mcp에서 다시 연결하고 브라우저에서 OAuth를 완료하세요.",
     agyTransport: "Antigravity는 Streamable HTTP를 지원합니다. 기존 SSE는 사용할 수 없습니다.",
-    writeFailed: "설정 파일을 쓰지 못했습니다: {{detail}}",
+    writeFailed: "설정 파일에 쓰지 못했습니다: {{detail}}",
     badConfig: "MCP 설정이 유효하지 않아 그대로 유지했습니다: {{detail}}",
     outsideProject: "설정 경로가 프로젝트 외부를 가리킵니다: {{detail}}",
     missingServer: "MCP 서버를 찾을 수 없습니다: {{detail}}",
