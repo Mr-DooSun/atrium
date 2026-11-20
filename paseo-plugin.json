@@ -4,6 +4,7 @@
   "description": "Nested agent tree sidebar, usage and token monitor for additional Claude and Codex accounts, and an MCP and plugin toolbox.",
   "media": [
     "assets/screenshot-sidebar.png",
+    "assets/screenshot-worktrees.png",
     "assets/screenshot-plugins.png",
     "assets/screenshot-confirm.png",
     "assets/screenshot-reorder.png"

@@ -1,9 +1,23 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { removeProject } from "../shared/project-rpc";
+import { projectWorktrees, removeProject, type WorktreeInfo } from "../shared/project-rpc";
 import { failure, run } from "./core/exec.ts";
 import { paseoHomeArgs, resolvePaseoCommand } from "./core/paseo-bin.ts";
+import { getWorktreeInfo } from "./core/worktree.ts";
 
 export function registerProject(server: PluginServerContext) {
+  server.handle(projectWorktrees, async ({ cwds }) => {
+    const directories = [...new Set(cwds)];
+    const entries: Array<readonly [string, WorktreeInfo]> = [];
+    // Keep a sidebar full of cold entries from starting every Git subprocess at once.
+    const concurrency = 16;
+    for (let offset = 0; offset < directories.length; offset += concurrency) {
+      const batch = directories.slice(offset, offset + concurrency);
+      const found = await Promise.all(batch.map(async (cwd) => [cwd, await getWorktreeInfo(cwd)] as const));
+      entries.push(...found);
+    }
+    return { worktrees: Object.fromEntries(entries) };
+  });
+
   server.handle(removeProject, async ({ projectId }) => {
     const paseo = await resolvePaseoCommand();
     // Same daemon home as this plugin's daemon when Paseo sets one; the CLI default otherwise.

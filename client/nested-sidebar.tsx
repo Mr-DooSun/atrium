@@ -1,10 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PanResponder, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   useAgent,
   useAgents,
   useProject,
   useProjects,
+  useRpc,
   useTranslation,
   useWorkspace,
   useWorkspaces,
@@ -15,9 +17,10 @@ import {
 } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plugin";
+import { MAX_WORKTREE_CWDS, projectWorktrees, type WorktreeInfo } from "../shared/project-rpc";
 import { buildTree, workspacesEmptiedBy, type TreeNode } from "../shared/tree";
-import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, type Palette } from "./look";
-import { ProviderMark, StatusMark, URGENT, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
+import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, worktreeBadge, type Palette } from "./look";
+import { ProviderMark, StatusMark, URGENT, WorktreeBadge, WorktreeBar, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
 import type { Bucket } from "./look";
 import { ChatSection, useChatDir } from "./chat";
 import {
@@ -77,6 +80,8 @@ interface Ctx {
   agentRefs: ReadonlyMap<string, AgentRef>;
   hasPendingPermission(ref: AgentRef): boolean;
   agentWorkspace: ReadonlyMap<string, string>;
+  /** The git worktree each session folder (an agent's cwd) is in; folders outside git are absent. */
+  worktrees: ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>>;
   collapsed: ReadonlySet<string>;
   toggle(key: string): void;
   /** True while project headers show up/down buttons instead of their rows. */
@@ -128,6 +133,50 @@ const visibleWorkspace = (w: PluginWorkspaceSnapshot) => !w.background && !w.arc
 // "closed" only means the agent's process is down (after a daemon restart, for instance); the
 // session is still there and Paseo's own sidebar keeps it. Archived agents never reach here.
 const visibleAgent = (a: PluginAgentSnapshot) => !a.background;
+
+const WORKTREE_REFRESH_MS = 20_000;
+const NO_WORKTREES: ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>> = new Map();
+
+/**
+ * The git worktree and branch of every session folder, asked of the server in batches. A session
+ * can switch branches while it works, so the answer is refreshed now and then (the server caches
+ * each folder for a few seconds as well); between refreshes the last answer stays on screen.
+ */
+function useWorktrees(): ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>> {
+  const fetchWorktrees = useRpc(projectWorktrees);
+  // Agents grouped by the folder they work in: one entry per distinct cwd.
+  const byCwd = useAgents({ where: visibleAgent, groupBy: (a) => a.cwd });
+  // Sorted and distinct, so the key only changes when the set of folders does, not their order.
+  // A workspace's own folder is asked about too: a workspace with one agent is drawn as one row.
+  const byDirectory = useWorkspaces({ where: visibleWorkspace, groupBy: (w) => w.directory });
+  const cwds = useMemo(
+    () => [...new Set([...byCwd, ...byDirectory].map((g) => g.key).filter((c) => c.length > 0))].sort(),
+    [byCwd, byDirectory],
+  );
+  const cwdsKey = cwds.join("\n");
+  const query = useQuery({
+    queryKey: ["atrium", "worktrees", cwdsKey],
+    queryFn: async () => {
+      const found = new Map<string, Extract<WorktreeInfo, { kind: "git" }>>();
+      for (let i = 0; i < cwds.length; i += MAX_WORKTREE_CWDS) {
+        const { worktrees } = await fetchWorktrees({ cwds: cwds.slice(i, i + MAX_WORKTREE_CWDS) });
+        for (const [cwd, info] of Object.entries(worktrees)) if (info.kind === "git") found.set(cwd, info);
+      }
+      return found;
+    },
+    enabled: cwds.length > 0,
+    staleTime: WORKTREE_REFRESH_MS,
+    refetchInterval: WORKTREE_REFRESH_MS,
+    refetchIntervalInBackground: false,
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+  // A failed refresh (or a server without project.worktrees) keeps the last answer, or none: the
+  // rows lose their badge at worst and the sidebar is unaffected.
+  const last = useRef(NO_WORKTREES);
+  if (query.data) last.current = query.data;
+  return last.current;
+}
 
 export function NestedSidebar(view: PluginSidebarViewProps) {
   // The free chat folder's workspaces live in the pinned section below, not in the tree.
@@ -182,6 +231,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     };
   }, [workspaceOrder, agentOrder, byProject, byCreator, byWorkspace, byParent]);
 
+  const worktrees = useWorktrees();
   const projectRefs = useMemo(() => new Map(projects.map((r) => [r.key, r])), [projects]);
   // The saved order names projects by root folder, which outlives the project's id.
   const byRoot = useProjects({ where: (pr) => pr.rootPath !== chatDir, groupBy: (pr) => pr.rootPath });
@@ -515,6 +565,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     projectRefs,
     agentRefs,
     agentWorkspace,
+    worktrees,
     hasPendingPermission,
     collapsed,
     toggle,
@@ -1030,6 +1081,7 @@ function WorkspaceRow({
     title: w.title,
     folder: w.name,
     branch: w.branch,
+    directory: w.directory,
     indicator: w.indicator,
     kind: w.kind,
     additions: w.diffStat?.additions ?? null,
@@ -1109,7 +1161,10 @@ function WorkspaceRow({
   const renameModal = <RenameModal state={rename} folder={ws.folder} p={p} />;
   // A branch only says something when the row works in its own worktree; rows on the project's
   // checkout would all repeat the same branch.
-  const branch = ws.kind === "worktree" ? ws.branch : null;
+  const worktree = ctx.worktrees.get(ws.directory) ?? null;
+  const badge = worktreeBadge(worktree);
+  // Our badge says it better; Paseo's own branch is the fallback when there is no answer.
+  const branch = !worktree && ws.kind === "worktree" ? ws.branch : null;
   const meta: ReactNode[] = [];
   if (running > 0) meta.push(<Text key="run" style={{ color: p.running }}>{t("runningBelow", { n: running })}</Text>);
   if (hidden > 0) meta.push(<Text key="hid">{t("collapsedBelow", { n: hidden })}</Text>);
@@ -1135,6 +1190,7 @@ function WorkspaceRow({
     >
       {(hovered) => (
         <>
+          {worktree && badge?.tone === "linked" ? <WorktreeBar info={worktree} p={p} /> : null}
           <Leading
             node={node}
             mark={
@@ -1171,9 +1227,14 @@ function WorkspaceRow({
               )}
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
+            {worktree && badge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
             {branch || meta.length > 0 ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                {branch ? <Icon name="GitBranch" size={12} color={p.muted} /> : null}
+                {branch ? (
+                  <View style={{ flexShrink: 0 }}>
+                    <Icon name="GitBranch" size={12} color={p.muted} />
+                  </View>
+                ) : null}
                 <Text numberOfLines={1} style={{ flexShrink: 1, color: p.muted, fontSize: 12 }}>
                   {branch ?? ""}
                   {meta.map((part, i) => (
@@ -1214,6 +1275,7 @@ function AgentRow({
     status: a.status,
     requiresAttention: a.requiresAttention,
     attentionReason: a.attentionReason,
+    cwd: a.cwd,
   }));
   const active = ctx.view.active.agent?.key === node.key;
   const { t } = useTranslation(sidebarText);
@@ -1232,6 +1294,8 @@ function AgentRow({
   const { p } = ctx;
   const hidden = open ? 0 : countDescendants(node);
   const canArchive = !isAgentTurnActive(agent.status) && !hasActiveDescendants;
+  const worktree = ctx.worktrees.get(agent.cwd) ?? null;
+  const badge = worktreeBadge(worktree);
   const modal = target ? (
     <ArchiveModal
       state={archive}
@@ -1263,6 +1327,7 @@ function AgentRow({
     >
       {(hovered) => (
         <>
+          {worktree && badge?.tone === "linked" ? <WorktreeBar info={worktree} p={p} /> : null}
           <Leading
             node={node}
             mark={<ProviderMark provider={agent.provider} p={ctx.p} />}
@@ -1289,7 +1354,7 @@ function AgentRow({
               )}
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
-
+            {worktree && badge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
           </View>
         </>
       )}

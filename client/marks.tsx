@@ -1,10 +1,13 @@
 // Row marks shared by the tree and the free chat section.
 import { useEffect, useRef, type ReactNode } from "react";
-import { Animated, Easing, Platform, View } from "react-native";
+import { Animated, Easing, Platform, Text, View } from "react-native";
 import type { PluginAgentSnapshot } from "@getpaseo/plugin";
+import { useTranslation } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { TITLE_LINE, type Bucket, type Palette } from "./look";
+import type { WorktreeInfo } from "../shared/project-rpc";
+import { TITLE_LINE, worktreeColor, type Bucket, type Palette, type WorktreeBadgeSpec } from "./look";
 import { providerMark } from "./provider-icons";
+import { sidebarText } from "./sidebar-strings";
 
 // ── Status mark: same geometry as Paseo's own sidebar ──────────────────
 
@@ -101,4 +104,89 @@ export const URGENT: readonly Bucket[] = ["needs_input", "failed", "running", "a
 export function mostUrgent(...buckets: readonly (Bucket | null | undefined)[]): Bucket {
   for (const level of URGENT) if (buckets.includes(level)) return level;
   return "done";
+}
+
+// ── Worktree badge ─────────────────────────────────────────────────────
+
+type GitWorktree = Extract<WorktreeInfo, { kind: "git" }>;
+
+/**
+ * The branch a session works on and, for a linked worktree, the worktree's folder, in the color
+ * every session of that worktree shares. `spec` comes from `worktreeBadge`. Long names are cut; the
+ * full branch and path are in the tooltip and the accessibility label.
+ */
+export function WorktreeBadge({ info, spec, p }: { info: GitWorktree; spec: WorktreeBadgeSpec; p: Palette }) {
+  const { t } = useTranslation(sidebarText);
+  const linked = spec.tone === "linked";
+  const color = linked ? worktreeColor(p, info.worktreePath) : p.muted;
+  const branch = spec.detached ? t("worktreeDetached", { head: spec.label }) : spec.label;
+  const label = spec.folder ? t("worktreeLinked", { folder: spec.folder, branch }) : t("worktreeMain", { branch });
+  // react-native-web drops `title` and the plugin SDK has no tooltip, so the full path is only
+  // in the accessibility label.
+  const full = `${label}. ${t("worktreePath", { path: info.worktreePath })}`;
+  return (
+    <View
+      accessible
+      accessibilityLabel={full}
+      // Never wider than the row: the branch (or the word "detached") gives way first, then the chip.
+      style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0, maxWidth: "100%", overflow: "hidden" }}
+    >
+      <View style={{ flexShrink: 0 }}>
+        <Icon name={linked ? "FolderGit2" : "GitBranch"} size={12} color={color} />
+      </View>
+      {spec.detached ? (
+        // The hash tells detached rows apart, so it never shrinks; the word before it may be cut.
+        <>
+          <Text numberOfLines={1} style={{ flexShrink: 0, color, fontSize: 12, opacity: linked ? 1 : 0.8 }}>
+            {spec.label}
+          </Text>
+          <Text numberOfLines={1} style={{ flexShrink: 4, minWidth: 0, color, fontSize: 12, opacity: 0.7 }}>
+            {t("worktreeDetached", { head: "" }).trim()}
+          </Text>
+        </>
+      ) : (
+        <Text numberOfLines={1} style={{ flexShrink: 4, minWidth: 0, color, fontSize: 12, opacity: linked ? 1 : 0.8 }}>
+          {spec.label}
+        </Text>
+      )}
+      {spec.folder ? (
+        <Text
+          numberOfLines={1}
+          style={{
+            flexShrink: 1,
+            minWidth: 24,
+            maxWidth: 112,
+            color,
+            fontSize: 11,
+            paddingHorizontal: 5,
+            borderRadius: 4,
+            borderWidth: 1,
+            borderColor: color,
+            opacity: 0.85,
+          }}
+        >
+          {spec.folder}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** A thin bar on a row's left edge, in its worktree's color, so sessions of one worktree line up. */
+export function WorktreeBar({ info, p }: { info: GitWorktree; p: Palette }) {
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        left: 2,
+        top: 6,
+        bottom: 6,
+        width: 3,
+        borderRadius: 2,
+        backgroundColor: worktreeColor(p, info.worktreePath),
+        opacity: 0.8,
+      }}
+    />
+  );
 }

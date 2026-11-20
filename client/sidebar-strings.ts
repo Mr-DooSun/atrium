@@ -41,6 +41,10 @@ const en = {
   saving: "Saving…",
   openInPanes: "Open in panes",
   paneDrag: "Drop on a pane to open",
+  worktreeDetached: "detached {{head}}",
+  worktreeLinked: "Worktree {{folder}}, branch {{branch}}",
+  worktreeMain: "Branch {{branch}}",
+  worktreePath: "Worktree path: {{path}}",
 };
 
 const zhCN = {
@@ -82,6 +86,10 @@ const zhCN = {
   saving: "正在保存…",
   openInPanes: "在分屏中打开",
   paneDrag: "拖放到分屏中打开",
+  worktreeDetached: "游离 {{head}}",
+  worktreeLinked: "工作树 {{folder}}，分支 {{branch}}",
+  worktreeMain: "分支 {{branch}}",
+  worktreePath: "工作树路径：{{path}}",
 };
 
 const ptBR = {
@@ -123,6 +131,10 @@ const ptBR = {
   saving: "Salvando…",
   openInPanes: "Abrir nos painéis",
   paneDrag: "Solte em um painel para abrir",
+  worktreeDetached: "desanexado {{head}}",
+  worktreeLinked: "Árvore de trabalho {{folder}}, branch {{branch}}",
+  worktreeMain: "Branch {{branch}}",
+  worktreePath: "Caminho da árvore de trabalho: {{path}}",
 };
 
 export const sidebarText = defineTranslations({
@@ -167,6 +179,10 @@ export const sidebarText = defineTranslations({
       saving: "저장 중…",
       openInPanes: "패널에서 열기",
       paneDrag: "패널에 놓아서 열기",
+      worktreeDetached: "detached {{head}}",
+      worktreeLinked: "워크트리 {{folder}}, 브랜치 {{branch}}",
+      worktreeMain: "브랜치 {{branch}}",
+      worktreePath: "워크트리 경로: {{path}}",
     },
     ja: {
       startChat: "新しいチャットを開始",
@@ -207,6 +223,10 @@ export const sidebarText = defineTranslations({
       saving: "保存中…",
       openInPanes: "ペインで開く",
       paneDrag: "ペインにドロップして開く",
+      worktreeDetached: "デタッチ {{head}}",
+      worktreeLinked: "ワークツリー {{folder}}、ブランチ {{branch}}",
+      worktreeMain: "ブランチ {{branch}}",
+      worktreePath: "ワークツリーのパス: {{path}}",
     },
     "zh-CN": zhCN,
     zh: zhCN,
@@ -249,6 +269,10 @@ export const sidebarText = defineTranslations({
       saving: "Guardando…",
       openInPanes: "Abrir en paneles",
       paneDrag: "Suelta en un panel para abrir",
+      worktreeDetached: "desvinculado {{head}}",
+      worktreeLinked: "Árbol de trabajo {{folder}}, rama {{branch}}",
+      worktreeMain: "Rama {{branch}}",
+      worktreePath: "Ruta del árbol de trabajo: {{path}}",
     },
     fr: {
       startChat: "Démarrer une discussion",
@@ -289,6 +313,10 @@ export const sidebarText = defineTranslations({
       saving: "Enregistrement…",
       openInPanes: "Ouvrir dans les volets",
       paneDrag: "Déposez sur un volet pour ouvrir",
+      worktreeDetached: "détaché {{head}}",
+      worktreeLinked: "Arbre de travail {{folder}}, branche {{branch}}",
+      worktreeMain: "Branche {{branch}}",
+      worktreePath: "Chemin de l’arbre de travail : {{path}}",
     },
     "pt-BR": ptBR,
     pt: ptBR,
@@ -331,6 +359,10 @@ export const sidebarText = defineTranslations({
       saving: "Сохранение…",
       openInPanes: "Открыть в панелях",
       paneDrag: "Перетащите на панель, чтобы открыть",
+      worktreeDetached: "отсоединён {{head}}",
+      worktreeLinked: "Рабочее дерево {{folder}}, ветка {{branch}}",
+      worktreeMain: "Ветка {{branch}}",
+      worktreePath: "Путь рабочего дерева: {{path}}",
     },
     ar: {
       startChat: "بدء محادثة جديدة",
@@ -371,6 +403,10 @@ export const sidebarText = defineTranslations({
       saving: "جارٍ الحفظ…",
       openInPanes: "فتح في الألواح",
       paneDrag: "أفلت على لوحة للفتح",
+      worktreeDetached: "منفصل {{head}}",
+      worktreeLinked: "شجرة العمل {{folder}}، الفرع {{branch}}",
+      worktreeMain: "الفرع {{branch}}",
+      worktreePath: "مسار شجرة العمل: {{path}}",
     },
   },
 });

@@ -15,6 +15,11 @@ features or behavior changes go in a minor release (0.2.0).
 - A composer in each pane. A message sent while the agent is working is added to the current turn instead of interrupting it, and Enter during IME composition (Korean, Japanese, Chinese) does not send.
 - Reorder panes by dragging the grip in the pane header, resize panes from their right edge (double-click resets), and keep both across restarts.
 - Plugin RPCs `chat.timelines` (live timelines for many agents), `chat.timeline.older` (older history) and `chat.links` (parent and child links).
+- Worktree badges on sidebar sessions: a session in a linked `git worktree` shows its branch, the worktree folder and a color bar shared by every session in that worktree. A session in the main checkout shows its branch only when it is off the default branch or on a detached HEAD. Needs `git` on the daemon host; folders outside git show no badge.
+
+### Fixed
+
+- Light themes whose surface color is not a six-digit hex value (for example `#fff` or `rgb(...)`) were treated as dark.
 
 ## [0.1.0] - 2026-11-20
 
