@@ -1,4 +1,4 @@
-Atrium changes how you work across many agents in Paseo. It adds three things: a sidebar that shows workspaces and agents as a tree, usage cards for additional Claude and Codex accounts, and `/mcp` and `/plugins` screens for managing MCP servers and plugins in every configured agent CLI.
+Atrium changes how you work across many agents in Paseo. It adds four things: a sidebar that shows workspaces and agents as a tree, a Panes screen that shows many agent chats side by side, usage cards for additional Claude and Codex accounts, and `/mcp` and `/plugins` screens for managing MCP servers and plugins in every configured agent CLI.
 
 ## Agent tree sidebar
 
@@ -29,6 +29,17 @@ Ordering:
 A General section stays pinned at the bottom of the sidebar for conversations that belong to no project. Paseo agents always run in a folder, so these run in `~/.paseo-chat` on the daemon, which the plugin creates on first use; that folder's workspaces are left out of the tree. The new chat button opens Paseo's own new workspace screen for that folder, so the provider picker works as usual.
 
 Background helpers and closed agents are hidden. Fold state is not saved across reloads. Sidebar labels are available in English, Korean, Japanese, Simplified Chinese, Spanish, French, Portuguese (Brazil), Russian and Arabic, following the app language, and fall back to English.
+
+## Panes
+
+The Panes screen shows the chats of many agents side by side, including agents from different projects and workspaces. Open it from the "Panes" row at the top of the sidebar or from the Command Center.
+
+- On desktop, drag a session out of the Atrium sidebar and drop it on the screen; a line shows where it will land. Dropping it anywhere outside the sidebar opens the screen with the session added. A hover button on session rows, the long-press menu on mobile and the Command Center item "Open this chat in panes" do the same without dragging.
+- Parent and child agents are kept together: parents come first, a family shares a color and a connecting line, each child shows which agent started it, and the arrows in the first pane move the whole family. Dropping an agent with sub-agents offers to open the ones that are not open yet.
+- Each pane shows the agent's provider, title and status, its chat with older messages loading as you scroll up, and a message box. A message sent while the agent is working is added to its current turn instead of interrupting it. Enter sends and Shift+Enter adds a line; Enter while an input method is composing (Korean, Japanese, Chinese) does not send.
+- Drag the grip in a pane header to reorder panes, and drag a pane's right edge to resize it; a double-click resets the width. Panes scroll sideways, and only the panes near the visible area are loaded, so there is no fixed limit on how many can be open.
+- The open panes, their order and widths are kept in the app's local storage on desktop and in the browser. On mobile they last until the app restarts, panes snap one at a time, and resizing is off.
+- Panes show agents of the host the plugin runs on. An agent from another connected host shows a note and a button to open it in Paseo instead of its chat.
 
 ## Usage for additional accounts
 
@@ -64,7 +75,7 @@ The toolbox screens use the same nine languages as the sidebar, following the ap
 
 ## Setup
 
-Requires Paseo 0.16.1 or later. Dragging to reorder is desktop only; mobile uses the long-press menu. The toolbox uses the agent CLIs installed on the daemon host (`claude`, `codex`, `agy`) and the `paseo` CLI; a CLI that is not installed shows as not installed. Worktree badges use `git` on the daemon host and are left out when it is missing. Usage cards need nothing beyond an account that is configured as a Paseo provider and logged in.
+Requires Paseo 0.16.1 or later. Dragging to reorder and dragging sessions into panes are desktop only; mobile uses the long-press menu. The toolbox uses the agent CLIs installed on the daemon host (`claude`, `codex`, `agy`) and the `paseo` CLI; a CLI that is not installed shows as not installed. Worktree badges use `git` on the daemon host and are left out when it is missing. Usage cards need nothing beyond an account that is configured as a Paseo provider and logged in.
 
 ## Data access
 
@@ -74,6 +85,8 @@ Network requests made by the plugin itself:
 
 - For each additional Claude account, the account's OAuth access token is sent to `https://api.anthropic.com/api/oauth/usage` to read its limits. Redirects are refused, and the token is not logged, stored or returned to the app.
 - The Paseo plugins tab downloads the public catalog from `https://plugins.paseo.sh/index.json`.
+
+The Panes screen reads agent timelines and parent links, and sends the messages you type, through the Paseo daemon's own API on the host. It makes no network requests of its own.
 
 Commands it runs on the daemon host (as separate processes, without a shell):
 
