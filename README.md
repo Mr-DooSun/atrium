@@ -54,7 +54,7 @@ Atrium runs on the daemon host with your user's permissions and sends no telemet
 - It runs the `claude`, `codex`, `agy`, `paseo` and `git` CLIs (and, on macOS, `/usr/bin/security` to read Claude logins from the Keychain). Changes run only after you confirm.
 - It reads Paseo's provider config, the additional accounts' identity, credential and session-log files, and MCP config files. It writes the sidebar order file, the `~/.paseo-chat` folder, and Antigravity's `mcp_config.json` when you change an Antigravity MCP server.
 
-The complete list of commands, files and network requests is in [OVERVIEW.md, Data access](OVERVIEW.md#data-access). Usage details are in [docs/usage-monitor.md](docs/usage-monitor.md).
+The complete list of commands, files and network requests is in [OVERVIEW.md, Data access](OVERVIEW.md#data-access-and-limits). Usage details are in [docs/usage-monitor.md](docs/usage-monitor.md).
 
 ## Development
 
