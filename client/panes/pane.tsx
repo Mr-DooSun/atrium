@@ -1,5 +1,5 @@
 // One chat column: header (provider, title, status, actions) over the agent's timeline.
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, PanResponder, Platform, Pressable, Text, View, type GestureResponderEvent, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
 import { useAgent, usePaseo, useRpc, useSubscription, useTranslation, type AgentRef } from "@getpaseo/plugin/client";
 import { FlatList, Icon, Markdown, TextInput, useToast } from "@getpaseo/plugin/client/ui";
@@ -8,7 +8,7 @@ import { panesText } from "../chat-strings";
 import { TITLE_LINE, type Palette } from "../look";
 import { ProviderMark, StatusMark, agentBucket, isAgentTurnActive } from "../marks";
 import { readableOn } from "./layout";
-import { applyOlder, applyTimelineEvent, displayItems, type AgentTimeline, type Timelines } from "./timeline";
+import { applyOlder, applyTimelineEvent, clearTimelineError, displayItems, errorBanner, rowWording, type AgentTimeline, type Timelines } from "./timeline";
 
 export interface PaneLink {
   /** Family color shared by every pane of the family. */
@@ -164,6 +164,23 @@ export const Pane = memo(function Pane({
   );
 });
 
+/**
+ * Web only: a handle must never start or carry a text selection. Pressing on selected text makes
+ * the browser start a native drag, and react-native-web ends the responder on `dragstart` no
+ * matter what onPanResponderTerminationRequest says, so the gesture would be dropped silently.
+ */
+export const NO_TEXT_SELECT: object = Platform.OS === "web" ? { userSelect: "none" } : {};
+
+/** Web only: drops any text selection left on the page (see NO_TEXT_SELECT). */
+function clearTextSelection(): void {
+  if (Platform.OS !== "web") return;
+  try {
+    (globalThis as { getSelection?(): { removeAllRanges(): void } | null }).getSelection?.()?.removeAllRanges();
+  } catch {
+    // No selection API here: nothing to clear.
+  }
+}
+
 function pageXOf(e: GestureResponderEvent): number {
   return e.nativeEvent.pageX;
 }
@@ -181,6 +198,7 @@ function DragGrip({ agent, handlers, label, p }: { agent: AgentRef; handlers: Pa
         onStartShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (e) => {
+          clearTextSelection();
           lastX.current = pageXOf(e);
           latest.current.handlers.onStart(latest.current.agent, lastX.current);
         },
@@ -201,7 +219,7 @@ function DragGrip({ agent, handlers, label, p }: { agent: AgentRef; handlers: Pa
       accessibilityLabel={label}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
-      style={{ width: 14, height: TITLE_LINE, marginLeft: -4, alignItems: "center", justifyContent: "center", borderRadius: 4, backgroundColor: hovered ? p.hover : "transparent", cursor: "grab" } as object}
+      style={{ width: 14, height: TITLE_LINE, marginLeft: -4, alignItems: "center", justifyContent: "center", borderRadius: 4, backgroundColor: hovered ? p.hover : "transparent", cursor: "grab", ...NO_TEXT_SELECT } as object}
     >
       <Icon name="GripVertical" size={13} color={p.muted} />
     </View>
@@ -239,6 +257,7 @@ function ResizeHandle({
         onStartShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
+          clearTextSelection();
           start.current = latest.current.width;
           setActive(true);
         },
@@ -282,6 +301,7 @@ function ResizeHandle({
         alignItems: "center",
         justifyContent: "center",
         cursor: "col-resize",
+        ...NO_TEXT_SELECT,
       } as object}
     >
       <View style={{ width: lit ? 3 : 1, height: lit ? "100%" : 32, borderRadius: 2, backgroundColor: lit ? p.running : p.guide }} />
@@ -306,43 +326,91 @@ function ParentLine({ parent, p }: { parent: AgentRef; p: Palette }) {
  * adds or removes this one), its rows (dropped when the pane unmounts), and the composer.
  */
 function PaneBody(props: { agent: AgentRef; p: Palette }) {
-  // Retry = remount: a fresh subscription and fresh rows, without touching the input schema.
+  // Retry = remount: a fresh subscription, without touching the input schema. The rows live here,
+  // above the remount, so older pages already loaded survive a retry: the new snapshot has the
+  // same epoch and is stitched onto them (applyTimelineEvent).
   const [nonce, setNonce] = useState(0);
-  return <LiveBody key={nonce} {...props} onRetry={() => setNonce((n) => n + 1)} />;
-}
-
-function LiveBody({ agent, p, onRetry }: { agent: AgentRef; p: Palette; onRetry(): void }) {
-  const { t } = useTranslation(panesText);
   // Timelines map of one entry, so the shared pure reducers apply unchanged.
   const [state, setState] = useState<Timelines>(() => new Map());
+  // The live generation. A replaced LiveBody's subscription can still deliver an event already in
+  // flight (and its older-page request can still resolve): those must not touch the rows.
+  const generation = useRef(0);
+  const update = useCallback((gen: number, change: (prev: Timelines) => Timelines) => {
+    if (gen === generation.current) setState(change);
+  }, []);
+  const agentId = props.agent.id;
+  const onRetry = useCallback(() => {
+    generation.current += 1;
+    // The old error would otherwise stay up (with its retry button) while the new one connects.
+    setState((s) => clearTimelineError(s, agentId));
+    setNonce(generation.current);
+  }, [agentId]);
+  return <LiveBody key={nonce} {...props} state={state} update={(change) => update(nonce, change)} onRetry={onRetry} />;
+}
+
+function LiveBody({
+  agent,
+  p,
+  state,
+  update: setState,
+  onRetry,
+}: {
+  agent: AgentRef;
+  p: Palette;
+  state: Timelines;
+  /** Changes the rows, unless this body's generation was replaced by a retry. */
+  update(change: (prev: Timelines) => Timelines): void;
+  onRetry(): void;
+}) {
+  const { t } = useTranslation(panesText);
   const input = useMemo(() => ({ agentIds: [agent.id], tail: TAIL }), [agent.id]);
   const live = useSubscription(chatTimelines, input, (event) => setState((s) => applyTimelineEvent(s, event)));
   const timeline: AgentTimeline | undefined = state.get(agent.id);
   // After a plugin reload, daemon restart or a rejected event the subscription ends: say so
-  // instead of spinning forever or silently showing stale rows.
-  const lost = live.status === "error" ? live.error.message || t("liveLost") : live.status === "closed" ? t("liveLost") : null;
+  // instead of spinning forever or silently showing stale rows. The user sees a translated line;
+  // the raw error (daemon or transport wording, often English) goes to the log.
+  const lost = live.status === "error" || live.status === "closed";
+  const liveError = live.status === "error" ? live.error : null;
+  useEffect(() => {
+    if (liveError) console.warn(`[atrium] chat pane ${agent.id}: live updates stopped`, liveError);
+  }, [liveError, agent.id]);
+  const timelineError = timeline?.error ?? null;
+  const banner = errorBanner(lost, timelineError, (timeline?.items.length ?? 0) > 0);
+  useEffect(() => {
+    if (timelineError) console.warn(`[atrium] chat pane ${agent.id}: timeline error: ${timelineError}`);
+  }, [timelineError, agent.id]);
 
   const fetchOlder = useRpc(chatOlder);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderFailed, setOlderFailed] = useState(false);
   const latest = useRef(timeline);
   latest.current = timeline;
+  // A ref, not the state: onEndReached can fire twice before the re-render that would show
+  // `loadingOlder`, and both calls would otherwise request the same page.
+  const inFlight = useRef(false);
   const loadOlder = useCallback(
     (force = false) => {
       const tl = latest.current;
       const oldest = tl?.items[0];
-      if (!tl || !oldest || !tl.hasMore || loadingOlder) return;
+      if (!tl || !oldest || !tl.hasMore || inFlight.current) return;
       // After a failure, only the retry button tries again (not every scroll to the top).
       if (olderFailed && !force) return;
+      inFlight.current = true;
       setLoadingOlder(true);
       setOlderFailed(false);
       fetchOlder({ agentId: agent.id, beforeSeq: oldest.seq, limit: TAIL, ...(tl.epoch ? { epoch: tl.epoch } : {}) })
         // Dropped if a snapshot replaced the rows while the page was in flight.
         .then((page) => setState((s) => applyOlder(s, agent.id, tl.epoch, page, oldest.seq)))
-        .catch(() => setOlderFailed(true))
-        .finally(() => setLoadingOlder(false));
+        .catch((error: unknown) => {
+          console.warn(`[atrium] chat pane ${agent.id}: older messages failed`, error);
+          setOlderFailed(true);
+        })
+        .finally(() => {
+          inFlight.current = false;
+          setLoadingOlder(false);
+        });
     },
-    [agent.id, fetchOlder, loadingOlder, olderFailed],
+    [agent.id, fetchOlder, olderFailed],
   );
 
   // Streamed replies arrive as one row per chunk; join them for display. Newest first for the
@@ -351,10 +419,10 @@ function LiveBody({ agent, p, onRetry }: { agent: AgentRef; p: Palette; onRetry(
 
   return (
     <>
-        {lost || timeline?.error ? (
+        {banner ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
-            <Text style={{ flex: 1, color: p.danger, fontSize: 12 }}>{t("loadFailed", { message: lost ?? timeline?.error ?? "" })}</Text>
-            <TextButton label={t("retry")} onPress={onRetry} p={p} />
+            <Text style={{ flex: 1, color: banner === "reconnecting" ? p.muted : p.danger, fontSize: 12 }}>{t(banner)}</Text>
+            {banner === "reconnecting" ? null : <TextButton label={t("retry")} onPress={onRetry} p={p} />}
           </View>
         ) : null}
         {!timeline && lost ? (
@@ -432,7 +500,10 @@ function Composer({ agent, p }: { agent: AgentRef; p: Palette }) {
       // interrupts when this is omitted).
       .send(message, { activeTurnBehavior: "steer" })
       .then(() => setText((cur) => (cur === message ? "" : cur)))
-      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : t("sendFailed")))
+      .catch((error: unknown) => {
+        console.warn(`[atrium] chat pane ${agent.id}: send failed`, error);
+        toast.error(t("sendFailed"));
+      })
       .finally(() => setSending(false));
   };
 
@@ -535,18 +606,19 @@ const Row = memo(function Row({ item, p }: { item: ChatItem; p: Palette }) {
       </View>
     );
   }
-  const label = item.kind === "tool" ? item.toolName || t("tool") : item.kind === "reasoning" ? t("thinking") : null;
+  const { label, body } = rowWording(item, t);
   return (
     <View style={{ flexDirection: "row", gap: 6, marginVertical: 2, opacity: 0.75 }}>
       {label ? (
         <Text numberOfLines={1} style={{ color: p.muted, fontSize: 11, fontWeight: "600", maxWidth: "40%" }}>{label}</Text>
       ) : null}
       <Text numberOfLines={item.kind === "reasoning" ? 4 : 2} style={{ flex: 1, color: p.muted, fontSize: 11, lineHeight: 16 }}>
-        {item.text}
+        {body}
       </Text>
     </View>
   );
 });
+
 
 function shallowEqual<T extends Record<string, unknown>>(a: T | null, b: T | null): boolean {
   if (a === b) return true;

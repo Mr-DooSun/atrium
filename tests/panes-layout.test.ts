@@ -115,3 +115,20 @@ test('family members insert after last open family member without moving existin
  assert.deepEqual(keys(L.addFamilyMembers(['x','y'].map(p),parentOf,'a',['c','d'].map(p))),['x','y','c','d']);
  assert.deepEqual(keys(L.addFamilyMembers(open,parentOf,'a',[p('b')])),['a','b','x','y']);
 });
+
+test('groupByFamily keeps every pane exactly once even when parents form a loop',()=>{
+ const check=(names:string[],parents:Record<string,string>)=>{
+  const ps=names.map(p); const groups=L.groupByFamily(ps,(k)=>parents[k]);
+  const all=groups.flatMap(g=>keys(g.panes)); const unique=[...new Set(names)].sort();
+  assert.deepEqual([...all].sort(),unique,JSON.stringify(parents));
+  for(const g of groups) assert.equal(g.depths.length,g.panes.length);
+  assert.deepEqual([...keys(L.arrangeByFamily(ps,(k)=>parents[k]))].sort(),unique);
+ };
+ check(['a','b'],{a:'b',b:'a'});
+ check(['b','a'],{a:'b',b:'a'});
+ check(['a','b','c'],{a:'b',b:'c',c:'a'});
+ check(['a'],{a:'a'});
+ check(['x','a','b','c','y'],{a:'b',b:'a',c:'a',y:'x'});
+ check(['a','b','c','d'],{a:'b',b:'a',c:'d',d:'c'});
+ check(['a','b','a'],{a:'b',b:'a'});
+});

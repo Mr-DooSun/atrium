@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PanResponder, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAgent,
   useAgents,
+  useHosts,
   useProject,
   useProjects,
   useRpc,
@@ -17,7 +18,7 @@ import {
 } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plugin";
-import { MAX_WORKTREE_CWDS, projectWorktrees, type WorktreeInfo } from "../shared/project-rpc";
+import { MAX_WORKTREE_CWDS, projectWorktrees, worktreeKey, type WorktreeInfo } from "../shared/project-rpc";
 import { buildTree, workspacesEmptiedBy, type TreeNode } from "../shared/tree";
 import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, worktreeBadge, type Palette } from "./look";
 import { ProviderMark, StatusMark, URGENT, WorktreeBadge, WorktreeBar, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
@@ -80,7 +81,8 @@ interface Ctx {
   agentRefs: ReadonlyMap<string, AgentRef>;
   hasPendingPermission(ref: AgentRef): boolean;
   agentWorkspace: ReadonlyMap<string, string>;
-  /** The git worktree each session folder (an agent's cwd) is in; folders outside git are absent. */
+  /** The git worktree of each session folder on the plugin's own host, keyed by `worktreeKey(hostId, cwd)`;
+   *  folders outside git and other hosts' folders are absent. */
   worktrees: ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>>;
   collapsed: ReadonlySet<string>;
   toggle(key: string): void;
@@ -136,35 +138,52 @@ const visibleAgent = (a: PluginAgentSnapshot) => !a.background;
 
 const WORKTREE_REFRESH_MS = 20_000;
 const NO_WORKTREES: ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>> = new Map();
+const OWN_HOST_KEY = ["atrium", "worktrees", "host"] as const;
 
 /**
  * The git worktree and branch of every session folder, asked of the server in batches. A session
  * can switch branches while it works, so the answer is refreshed now and then (the server caches
  * each folder for a few seconds as well); between refreshes the last answer stays on screen.
+ *
+ * Only the plugin's own daemon can look into a folder, so only its host's sessions are asked
+ * about, and the map is keyed by `worktreeKey(hostId, cwd)`: the same path on another host is a
+ * different folder. Other hosts' rows keep Paseo's own branch line.
  */
 function useWorktrees(): ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>> {
   const fetchWorktrees = useRpc(projectWorktrees);
+  const queryClient = useQueryClient();
+  const ownHost = useOwnHost(fetchWorktrees);
+  const onOwnHost = useCallback((s: { hostId: string }) => ownHost !== null && s.hostId === ownHost, [ownHost]);
   // Agents grouped by the folder they work in: one entry per distinct cwd.
-  const byCwd = useAgents({ where: visibleAgent, groupBy: (a) => a.cwd });
+  const byCwd = useAgents({ where: (a) => visibleAgent(a) && onOwnHost(a), groupBy: (a) => a.cwd });
   // Sorted and distinct, so the key only changes when the set of folders does, not their order.
   // A workspace's own folder is asked about too: a workspace with one agent is drawn as one row.
-  const byDirectory = useWorkspaces({ where: visibleWorkspace, groupBy: (w) => w.directory });
+  const byDirectory = useWorkspaces({ where: (w) => visibleWorkspace(w) && onOwnHost(w), groupBy: (w) => w.directory });
   const cwds = useMemo(
     () => [...new Set([...byCwd, ...byDirectory].map((g) => g.key).filter((c) => c.length > 0))].sort(),
     [byCwd, byDirectory],
   );
   const cwdsKey = cwds.join("\n");
   const query = useQuery({
-    queryKey: ["atrium", "worktrees", cwdsKey],
+    queryKey: ["atrium", "worktrees", ownHost, cwdsKey],
     queryFn: async () => {
       const found = new Map<string, Extract<WorktreeInfo, { kind: "git" }>>();
+      if (ownHost === null) return found;
       for (let i = 0; i < cwds.length; i += MAX_WORKTREE_CWDS) {
-        const { worktrees } = await fetchWorktrees({ cwds: cwds.slice(i, i + MAX_WORKTREE_CWDS) });
-        for (const [cwd, info] of Object.entries(worktrees)) if (info.kind === "git") found.set(cwd, info);
+        const { hostId, worktrees } = await fetchWorktrees({ cwds: cwds.slice(i, i + MAX_WORKTREE_CWDS) });
+        // Another daemon answers now (the sidebar was moved to another host, or ownHost was only
+        // a guess): its folders are not ownHost's. Learn its name; the next round asks its own sessions.
+        if (hostId !== null && hostId !== ownHost) {
+          queryClient.setQueryData(OWN_HOST_KEY, hostId);
+          return new Map<string, Extract<WorktreeInfo, { kind: "git" }>>();
+        }
+        for (const [cwd, info] of Object.entries(worktrees)) {
+          if (info.kind === "git") found.set(worktreeKey(ownHost, cwd), info);
+        }
       }
       return found;
     },
-    enabled: cwds.length > 0,
+    enabled: ownHost !== null && cwds.length > 0,
     staleTime: WORKTREE_REFRESH_MS,
     refetchInterval: WORKTREE_REFRESH_MS,
     refetchIntervalInBackground: false,
@@ -172,10 +191,34 @@ function useWorktrees(): ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git"
     retry: 1,
   });
   // A failed refresh (or a server without project.worktrees) keeps the last answer, or none: the
-  // rows lose their badge at worst and the sidebar is unaffected.
-  const last = useRef(NO_WORKTREES);
-  if (query.data) last.current = query.data;
-  return last.current;
+  // rows lose their badge at worst and the sidebar is unaffected. An answer is only kept for the
+  // host it was asked of: when the host becomes unknown or changes, the badges go rather than freeze.
+  const last = useRef<{ host: string | null; map: ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>> }>({ host: null, map: NO_WORKTREES });
+  if (last.current.host !== ownHost) last.current = { host: ownHost, map: NO_WORKTREES };
+  if (ownHost !== null && query.data && query.isPlaceholderData === false) last.current = { host: ownHost, map: query.data };
+  return last.current.map;
+}
+
+/**
+ * The host id of the daemon serving this plugin's RPCs, or null while unknown. The daemon names
+ * itself in every project.worktrees answer; an older server does not, and then the only host it
+ * can be is the single configured one. With several hosts and no name, no folder is asked about.
+ * `useWorktrees` renames it when a later answer names a different daemon.
+ */
+function useOwnHost(fetchWorktrees: (input: { cwds: string[] }) => Promise<{ hostId: string | null }>): string | null {
+  const hosts = useHosts();
+  const named = useQuery({
+    queryKey: OWN_HOST_KEY,
+    queryFn: async () => (await fetchWorktrees({ cwds: [] })).hostId,
+    // Once named, the host never changes; an unnamed answer is asked again now and then.
+    staleTime: (q) => (q.state.data ? Infinity : WORKTREE_REFRESH_MS),
+    refetchInterval: (q) => (q.state.data ? false : WORKTREE_REFRESH_MS * 3),
+    refetchIntervalInBackground: false,
+    retry: 1,
+  });
+  if (named.data) return named.data;
+  if (named.isSuccess && hosts.length === 1) return hosts[0].serverId;
+  return null;
 }
 
 export function NestedSidebar(view: PluginSidebarViewProps) {
@@ -1161,7 +1204,7 @@ function WorkspaceRow({
   const renameModal = <RenameModal state={rename} folder={ws.folder} p={p} />;
   // A branch only says something when the row works in its own worktree; rows on the project's
   // checkout would all repeat the same branch.
-  const worktree = ctx.worktrees.get(ws.directory) ?? null;
+  const worktree = ctx.worktrees.get(worktreeKey(reference.hostId, ws.directory)) ?? null;
   const badge = worktreeBadge(worktree);
   // Our badge says it better; Paseo's own branch is the fallback when there is no answer.
   const branch = !worktree && ws.kind === "worktree" ? ws.branch : null;
@@ -1294,7 +1337,7 @@ function AgentRow({
   const { p } = ctx;
   const hidden = open ? 0 : countDescendants(node);
   const canArchive = !isAgentTurnActive(agent.status) && !hasActiveDescendants;
-  const worktree = ctx.worktrees.get(agent.cwd) ?? null;
+  const worktree = ctx.worktrees.get(worktreeKey(reference.hostId, agent.cwd)) ?? null;
   const badge = worktreeBadge(worktree);
   const modal = target ? (
     <ArchiveModal

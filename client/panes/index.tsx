@@ -6,7 +6,7 @@ import { panesText } from "../chat-strings";
 import { onOpenInPanes, openInPanes } from "./drop-bus";
 import { addPane } from "./layout";
 import { PanesScreen } from "./screen";
-import { setPanes, usePanes } from "./store";
+import { setPanes, usePanes, watchOtherWindows } from "./store";
 
 export const PANES_SCREEN = "panes";
 
@@ -25,6 +25,8 @@ function PanesSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps)
 
 export function registerPanes(client: PluginClientContext): () => void {
   const cleanups = [
+    // Panes closed or opened in another window of the app reach this one (and stop with the plugin).
+    watchOtherWindows(),
     // The one place "open in panes" adds a pane (the sidebar has no openScreen): add it, then
     // bring the screen up. Registered first, so anything queued before the plugin loaded lands
     // here once; the screen's own listener only offers to add the family.

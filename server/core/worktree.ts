@@ -54,17 +54,29 @@ async function findDefaultBranch(cwd: string): Promise<string | null> {
   return null;
 }
 
+/** `git worktree list --porcelain` as entries of fields, or null when Git fails. */
+async function listWorktrees(cwd: string): Promise<string[][] | null> {
+  // NUL delimiters preserve newlines and whitespace in paths.
+  const nul = await git(cwd, "worktree", "list", "--porcelain", "-z");
+  if (failure(nul) === null) return nul.stdout.split("\0\0").filter(Boolean).map((entry) => entry.split("\0"));
+  // Git before 2.36 (Ubuntu 22.04 ships 2.34) has no -z and exits 129 for the unknown option.
+  // Its newline output is right for every path without a newline in it.
+  if (nul.code !== 129) return null;
+  const lines = await git(cwd, "worktree", "list", "--porcelain");
+  if (failure(lines) !== null) return null;
+  return lines.stdout.split(/\r?\n\r?\n/).filter(Boolean).map((entry) => entry.split(/\r?\n/));
+}
+
 async function inspectWorktree(cwd: string): Promise<WorktreeInfo> {
   const topLevel = await git(cwd, "rev-parse", "--show-toplevel");
   if (failure(topLevel) !== null) return { kind: "none" };
   const worktreePath = await canonicalGitPath(topLevel.stdout.replace(gitLineEnding, ""));
   if (worktreePath === null) return { kind: "none" };
 
-  const listing = await git(cwd, "worktree", "list", "--porcelain", "-z");
-  if (failure(listing) !== null) return { kind: "none" };
+  const entries = await listWorktrees(cwd);
+  if (entries === null) return { kind: "none" };
 
-  // Git emits the primary entry first. NUL delimiters preserve whitespace in paths.
-  const entries = listing.stdout.split("\0\0").filter(Boolean).map((entry) => entry.split("\0"));
+  // Git emits the primary entry first.
   const [mainEntry] = entries;
   if (!mainEntry?.[0].startsWith(WORKTREE_PREFIX)) return { kind: "none" };
   const mainPath = await canonicalGitPath(mainEntry[0].slice(WORKTREE_PREFIX.length));

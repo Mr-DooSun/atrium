@@ -3,21 +3,47 @@ import assert from 'node:assert/strict';
 import { toChatItem, computeChatLinks } from '../shared/chat/convert.ts';
 import { chatTimelines, chatOlder, chatLinks, ChatItem } from '../shared/chat/rpc.ts';
 
-test('converts all timeline item kinds with sequence, timestamp and summaries', () => {
-  const cases = [
-    [{type:'user_message', text:'u'}, 'user', 'u'], [{type:'assistant_message', text:'a'}, 'assistant', 'a'],
-    [{type:'reasoning', text:'r'}, 'reasoning', 'r'], [{type:'tool_call', name:'shell', status:'running'}, 'tool', 'shell (running)'],
-    [{type:'todo', items:[{text:'done', completed:true},{text:'next', completed:false}]}, 'status', '- [x] done\n- [ ] next'],
-    [{type:'error', message:'oops'}, 'status', 'oops'], [{type:'notification', message:'notice'}, 'status', 'notice'],
-    [{type:'compaction', status:'completed'}, 'status', 'Context compacted'], [{type:'compaction', status:'running'}, 'status', 'Compacting context'],
-    [{type:'plugin', pluginId:'plug', id:'entry', kind:'note'}, 'other', 'plug: note'],
-  ] as const;
-  for (const [item, kind, text] of cases) {
+test('converts all timeline item kinds with sequence, timestamp, data fields and codes', () => {
+  type Expected = { kind: string; text: string; id?: string; toolName?: string; status?: string; code?: string; messageId?: string };
+  const cases: [unknown, Expected][] = [
+    [{type:'user_message', text:'u'}, {kind:'user', text:'u'}],
+    [{type:'assistant_message', text:'a'}, {kind:'assistant', text:'a'}],
+    [{type:'assistant_message', text:'a', messageId:'m'}, {kind:'assistant', text:'a', messageId:'m'}],
+    [{type:'reasoning', text:'r'}, {kind:'reasoning', text:'r'}],
+    [{type:'tool_call', callId:'c1', name:'shell', status:'running'}, {kind:'tool', text:'shell (running)', toolName:'shell', status:'running', id:'tool:c1'}],
+    [{type:'todo', items:[{text:'done', completed:true},{text:'next', completed:false}]}, {kind:'status', text:'- [x] done\n- [ ] next'}],
+    [{type:'error', message:'oops'}, {kind:'status', text:'oops'}],
+    [{type:'notification', message:'notice'}, {kind:'status', text:'notice'}],
+    [{type:'compaction', status:'completed'}, {kind:'status', text:'Context compacted', code:'compacted'}],
+    [{type:'compaction', status:'running'}, {kind:'status', text:'Compacting context', code:'compacting'}],
+    [{type:'plugin', pluginId:'plug', id:'entry', kind:'note'}, {kind:'other', text:'plug: note', code:'plugin', id:JSON.stringify(['plug','entry'])}],
+    [{type:'plugin'}, {kind:'other', text:'Plugin', code:'plugin'}],
+    [{}, {kind:'other', text:'Unknown timeline item', code:'unknown'}],
+    [{type:'future'}, {kind:'other', text:'future', code:'unknown'}],
+  ];
+  for (const [item, want] of cases) {
+    const label = JSON.stringify(item);
     const row = toChatItem({item, seqStart:42, timestamp:'2026-01-01'} as Parameters<typeof toChatItem>[0]);
-    assert.equal(row.kind, kind); assert.equal(row.text, text); assert.equal(row.seq, 42); assert.equal(row.at, '2026-01-01');
-    assert.equal(row.id, kind === 'other' ? JSON.stringify(['plug','entry']) : '42');
-    if (kind === 'tool') assert.equal(row.toolName, 'shell');
+    assert.equal(row.kind, want.kind, label); assert.equal(row.text, want.text, label);
+    assert.equal(row.seq, 42, label); assert.equal(row.at, '2026-01-01', label);
+    assert.equal(row.id, want.id ?? '42', label);
+    assert.equal(row.toolName, want.toolName, label); assert.equal(row.status, want.status, label);
+    assert.equal(row.code, want.code, label); assert.equal(row.messageId, want.messageId, label);
+    assert.equal('projected' in row, false, label);
+    assert.equal(ChatItem.safeParse(row).success, true, label);
   }
+});
+
+test('projected is true exactly when the entry has a numeric seqEnd, and the key is absent otherwise', () => {
+  const convert = (extra: object) => toChatItem({item:{type:'assistant_message', text:'a'}, seqStart:3, timestamp:'t', ...extra} as Parameters<typeof toChatItem>[0]);
+  assert.equal(convert({seqEnd:3}).projected, true);
+  assert.equal(convert({seqEnd:0}).projected, true);
+  for (const extra of [{}, {seqEnd:undefined}, {seqEnd:null}, {seqEnd:'4'}]) {
+    const row = convert(extra);
+    assert.equal('projected' in row, false, JSON.stringify(extra));
+    assert.equal(ChatItem.safeParse(row).success, true);
+  }
+  assert.equal(ChatItem.safeParse(convert({seqEnd:3})).success, true);
 });
 
 test('links include external relatives, handle missing parents, duplicates and cycles', () => {
@@ -73,4 +99,12 @@ test('older history input accepts optional epoch and validates its type',()=>{
  assert.deepEqual(chatOlder.input.parse({agentId:'a',beforeSeq:3}),{agentId:'a',beforeSeq:3,limit:100});
  assert.deepEqual(chatOlder.input.parse({agentId:'a',beforeSeq:3,epoch:'epoch-1'}),{agentId:'a',beforeSeq:3,limit:100,epoch:'epoch-1'});
  assert.equal(chatOlder.input.safeParse({agentId:'a',beforeSeq:3,epoch:123}).success,false);
+});
+
+test('chat events accept a row code this version does not know',()=>{
+ const row={id:'1',seq:1,kind:'other',text:'x',code:'brand-new'};
+ assert.equal(chatTimelines.event.safeParse({type:'append',agentId:'a',epoch:'e',items:[row]}).success,true);
+ assert.equal(chatTimelines.event.safeParse({type:'snapshot',agentId:'a',epoch:'e',items:[row],hasMore:false}).success,true);
+ assert.equal(chatOlder.output.safeParse({items:[row],hasMore:false}).success,true);
+ assert.equal(ChatItem.safeParse({...row,code:7}).success,false);
 });

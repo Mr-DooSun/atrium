@@ -130,12 +130,18 @@ export function groupByFamily<P extends PaneRef>(panes: readonly P[], parentOf: 
     for (const list of children.values()) list.sort((a, b) => order.get(a)! - order.get(b)!);
     const ordered: P[] = [];
     const depths: number[] = [];
+    const visited = new Set<string>();
     const visit = (key: string, depth: number) => {
+      if (visited.has(key)) return;
+      visited.add(key);
       ordered.push(byKey.get(key)!);
       depths.push(depth);
       for (const child of children.get(key) ?? []) visit(child, depth + 1);
     };
     for (const top of children.get(null) ?? []) visit(top, 0);
+    // Members on a parent loop have no top to hang from: start from the earliest one instead of
+    // dropping them (a dropped pane would be lost for good on the next save).
+    for (const m of members) visit(m.key, 0);
     out.push({ rootKey, panes: ordered, depths });
   }
   return out;

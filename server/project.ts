@@ -1,11 +1,14 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { projectWorktrees, removeProject, type WorktreeInfo } from "../shared/project-rpc";
 import { failure, run } from "./core/exec.ts";
+import { ownHostId } from "./core/host-id.ts";
 import { paseoHomeArgs, resolvePaseoCommand } from "./core/paseo-bin.ts";
 import { getWorktreeInfo } from "./core/worktree.ts";
 
 export function registerProject(server: PluginServerContext) {
-  server.handle(projectWorktrees, async ({ cwds }) => {
+  server.handle(projectWorktrees, async ({ cwds }, context) => {
+    // Looked up alongside the folders, not before them; cached once found.
+    const hostId = ownHostId(context?.paseo);
     const directories = [...new Set(cwds)];
     const entries: Array<readonly [string, WorktreeInfo]> = [];
     // Keep a sidebar full of cold entries from starting every Git subprocess at once.
@@ -15,7 +18,7 @@ export function registerProject(server: PluginServerContext) {
       const found = await Promise.all(batch.map(async (cwd) => [cwd, await getWorktreeInfo(cwd)] as const));
       entries.push(...found);
     }
-    return { worktrees: Object.fromEntries(entries) };
+    return { hostId: await hostId, worktrees: Object.fromEntries(entries) };
   });
 
   server.handle(removeProject, async ({ projectId }) => {

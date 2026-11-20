@@ -39,7 +39,7 @@ import {
   visibleRange,
   type PaneRef,
 } from "./layout";
-import { Pane, type PaneLink, type PaneReorderHandlers, type PaneResize } from "./pane";
+import { NO_TEXT_SELECT, Pane, type PaneLink, type PaneReorderHandlers, type PaneResize } from "./pane";
 import { setPaneWidth, setPanes, usePaneWidths, usePanes } from "./store";
 
 const GAP = 12;
@@ -107,6 +107,9 @@ export function PanesScreen(props: PluginScreenProps) {
     queryFn: () => fetchLinks({ agentIds: unknownIds }),
     enabled: unknownIds.length > 0,
     staleTime: 60_000,
+    // Opening one more unknown pane changes the key: keep the old links until the new ones
+    // arrive, or every family resolved through them falls apart (and flickers back) meanwhile.
+    placeholderData: (previous) => previous,
   });
   const parentOf = useCallback(
     (key: string): string | null => {
@@ -273,18 +276,25 @@ export function PanesScreen(props: PluginScreenProps) {
   };
   const indexAtRef = useRef(contentIndexAt);
   indexAtRef.current = contentIndexAt;
-  const measureFrame = () =>
+  const measureFrame = (then?: () => void) =>
     frameRef.current?.measureInWindow((x, y, w, h) => {
       rectRef.current = { x, y, width: w, height: h };
+      then?.();
     });
   const reorder: PaneReorderHandlers = useMemo(
     () => ({
       onStart: (agent, pageX) => {
-        measureFrame();
         reorderKey.current = agent.key;
         pointerX.current = pageX;
         setReordering(agent.key);
-        setHoverIndex(indexAtRef.current(pageX));
+        // Before the first measurement there is no frame origin, and an index computed from 0
+        // would put the drop bar in the wrong place: place it once the frame is measured (and
+        // right away too when an earlier measurement exists, then correct it).
+        if (rectRef.current) setHoverIndex(indexAtRef.current(pageX));
+        measureFrame(() => {
+          const x = pointerX.current;
+          if (reorderKey.current === agent.key && x !== null) setHoverIndex(indexAtRef.current(x));
+        });
       },
       onMove: (pageX) => {
         pointerX.current = pageX;
@@ -304,6 +314,21 @@ export function PanesScreen(props: PluginScreenProps) {
     }),
     [],
   );
+  // The dragged or resized pane can vanish mid-gesture ("close all", another window's save):
+  // its handle unmounts and never reports the end, which would leave scrolling disabled and the
+  // auto-scroll timer running. Drop the gesture state instead.
+  useEffect(() => {
+    if (reordering && (arranged.length < 2 || !arranged.some((x) => x.key === reordering))) {
+      reorderKey.current = null;
+      pointerX.current = null;
+      setReordering(null);
+      setHoverIndex(null);
+    }
+  }, [reordering, arranged]);
+  useEffect(() => {
+    if (resizing && !arranged.some((x) => x.key === resizing.key)) setResizing(null);
+  }, [resizing, arranged]);
+
   // Auto-scroll while the pointer is near the left or right edge.
   useEffect(() => {
     if (!reordering) return;
@@ -419,7 +444,9 @@ export function PanesScreen(props: PluginScreenProps) {
         >
           {/* Panes sit at their offsets, so any subset can mount: the visible ones plus the one
               being dragged, which must not unmount mid-gesture. */}
-          <View style={{ width: total, height: Math.max(240, scrollHeight - PAD * 2) }}>
+          {/* No text selection while a pane is moved or resized: dragging over the chats would
+              select them, and a selection under the pointer can end the gesture (NO_TEXT_SELECT). */}
+          <View style={[{ width: total, height: Math.max(240, scrollHeight - PAD * 2) }, reordering || resizing ? NO_TEXT_SELECT : null]}>
             {mounted.map(({ pane, index }) => (
               <View key={pane.key} style={{ position: "absolute", left: offsets[index], top: 0, bottom: 0, width: widths[index] }}>
                 <Pane

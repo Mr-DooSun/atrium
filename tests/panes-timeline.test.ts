@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EMPTY_TIMELINE, mergeItems, applyTimelineEvent, applyOlder, displayItems, overlaps } from '../client/panes/timeline.ts';
+import { EMPTY_TIMELINE, mergeItems, applyTimelineEvent, applyOlder, displayItems, overlaps, toolStatusText, rowWording, errorBanner, clearTimelineError } from '../client/panes/timeline.ts';
 import type { ChatItem } from '../shared/chat/rpc.ts';
+import { COMPACTED_FALLBACK_TEXT, COMPACTING_FALLBACK_TEXT, toChatItem } from '../shared/chat/convert.ts';
 const row=(seq:number,text=String(seq)):ChatItem=>({id:String(seq),seq,kind:'assistant',text});
 test('merges items by id, incoming wins and sorts',()=>{
  assert.deepEqual(mergeItems([row(3),row(1)],[row(1,'updated'),row(2)]),[row(1,'updated'),row(2),row(3)]);
@@ -61,4 +62,98 @@ test('tool update retains its original position and separates assistant bubbles'
  state=applyTimelineEvent(state,{type:'append',agentId:'a',epoch:'e',items:[update]});
  assert.deepEqual(state.get('a')?.items,expected);
  assert.deepEqual(displayItems(state.get('a')!.items),[row(1,'A'),{...update,seq:2},{...row(3,'BC'),seq:4}]);
+});
+
+const asst=(seq:number,text:string,extra:Partial<ChatItem>={}):ChatItem=>({id:String(seq),seq,kind:'assistant',text,...extra});
+const summary=(items:ChatItem[])=>items.map(i=>[i.id,i.seq,i.text]);
+test('toolStatusText words known states through t and leaves others as they are',()=>{
+ const t=(key:string)=>key;
+ assert.equal(toolStatusText('running',t),'toolRunning'); assert.equal(toolStatusText('completed',t),'toolCompleted');
+ assert.equal(toolStatusText('failed',t),'toolFailed'); assert.equal(toolStatusText('canceled',t),'toolCanceled');
+ assert.equal(toolStatusText('cancelled',t),'toolCanceled'); assert.equal(toolStatusText('weird',t),'weird');
+ assert.equal(toolStatusText(undefined,t),''); assert.equal(toolStatusText('',t),'');
+});
+test('displayItems never joins a projected row, and joins live chunks onto the row before them',()=>{
+ const A=asst(1,'A',{projected:true}), B=asst(2,'B',{projected:true});
+ assert.deepEqual(summary(displayItems([A,B])),[['1',1,'A'],['2',2,'B']]);
+ assert.deepEqual(summary(displayItems([A,asst(2,'b1'),asst(3,'b2')])),[['1',3,'Ab1b2']]);
+ assert.deepEqual(summary(displayItems([asst(1,'a1'),B])),[['1',1,'a1'],['2',2,'B']]);
+ assert.deepEqual(summary(displayItems([A,asst(2,'b1'),asst(3,'C',{projected:true})])),[['1',2,'Ab1'],['3',3,'C']]);
+});
+test('displayItems keeps assistant messages with different messageIds apart and joins equal or missing ones',()=>{
+ assert.equal(displayItems([asst(1,'a',{messageId:'m1'}),asst(2,'b',{messageId:'m2'})]).length,2);
+ assert.deepEqual(summary(displayItems([asst(1,'a',{messageId:'m1'}),asst(2,'b',{messageId:'m1'})])),[['1',2,'ab']]);
+ assert.deepEqual(summary(displayItems([asst(1,'a',{messageId:'m1'}),asst(2,'b')])),[['1',2,'ab']]);
+ assert.deepEqual(summary(displayItems([asst(1,'a'),asst(2,'b',{messageId:'m2'})])),[['1',2,'ab']]);
+});
+test('displayItems applies the same rules to reasoning rows and never joins across kinds',()=>{
+ const r=(seq:number,text:string,extra:Partial<ChatItem>={}):ChatItem=>({id:String(seq),seq,kind:'reasoning',text,...extra});
+ assert.equal(displayItems([r(1,'A',{projected:true}),r(2,'B',{projected:true})]).length,2);
+ assert.deepEqual(summary(displayItems([r(1,'A',{projected:true}),r(2,'b1'),r(3,'b2')])),[['1',3,'Ab1b2']]);
+ assert.equal(displayItems([r(1,'a',{messageId:'m1'}),r(2,'b',{messageId:'m2'})]).length,2);
+ assert.equal(displayItems([r(1,'a',{messageId:'m1'}),r(2,'b',{messageId:'m1'})]).length,1);
+ assert.equal(displayItems([asst(1,'a'),r(2,'b')]).length,2);
+ assert.equal(displayItems([r(1,'a'),asst(2,'b')]).length,2);
+});
+
+test('rowWording words rows from structured fields, with t returning its key',()=>{
+ const t=(key:string)=>key;
+ const w=(item:Partial<ChatItem>)=>rowWording({id:'1',seq:1,kind:'other',text:'',...item} as ChatItem,t);
+ assert.deepEqual(w({kind:'tool',toolName:'shell',status:'running',text:'shell (running)'}),{label:'shell',body:'toolRunning'});
+ assert.deepEqual(w({kind:'status',code:'compacted',text:'Context compacted'}),{label:null,body:'compacted'});
+ assert.deepEqual(w({kind:'status',code:'compacting',text:'Compacting context'}),{label:null,body:'compacting'});
+ assert.deepEqual(w({code:'plugin',text:'Plugin'}),{label:'plugin',body:''});
+ assert.deepEqual(w({code:'plugin',text:'plug: note'}),{label:'plugin',body:'plug: note'});
+ assert.deepEqual(w({code:'unknown',text:'Unknown timeline item'}),{label:'unknownItem',body:''});
+ assert.deepEqual(w({code:'unknown',text:'future'}),{label:'unknownItem',body:'future'});
+ assert.deepEqual(w({kind:'reasoning',text:'hmm'}),{label:'thinking',body:'hmm'});
+ assert.deepEqual(w({code:'brand-new',text:'x'}),{label:'unknownItem',body:'x'});
+ assert.deepEqual(w({kind:'status',text:'plain'}),{label:null,body:'plain'});
+});
+test('errorBanner picks the line above a pane',()=>{
+ assert.equal(errorBanner(true,null,true),'liveLost'); assert.equal(errorBanner(true,'x',false),'liveLost');
+ assert.equal(errorBanner(false,'x',true),'reconnecting'); assert.equal(errorBanner(false,'x',false),'loadFailed');
+ assert.equal(errorBanner(false,null,true),null); assert.equal(errorBanner(false,null,false),null);
+});
+test('a same-epoch snapshot overlapping the newest cached rows keeps the older rows loaded earlier',()=>{
+ let state=applyTimelineEvent(new Map(),{type:'snapshot',agentId:'a',epoch:'e',items:[row(3),row(4)],hasMore:true});
+ state=applyOlder(state,'a','e',{items:[row(1),row(2)],hasMore:false});
+ state=applyTimelineEvent(state,{type:'snapshot',agentId:'a',epoch:'e',items:[row(3),row(4),row(5)],hasMore:true});
+ assert.deepEqual(state.get('a')?.items.map(i=>i.seq),[1,2,3,4,5]);
+ assert.equal(state.get('a')?.hasMore,false);
+});
+
+test('clearTimelineError drops an error-only entry, keeps rows and epoch otherwise, and returns the same state when there is no error',()=>{
+ const errorOnly=applyTimelineEvent(new Map(),{type:'error',agentId:'a',message:'offline'});
+ assert.equal(errorOnly.get('a')?.error,'offline');
+ const cleared=clearTimelineError(errorOnly,'a');
+ assert.equal(cleared.has('a'),false);
+ assert.equal(errorOnly.has('a'),true,'the input state is not mutated');
+
+ let loaded=applyTimelineEvent(new Map(),{type:'snapshot',agentId:'a',epoch:'e',items:[row(1),row(2)],hasMore:true});
+ loaded=applyTimelineEvent(loaded,{type:'error',agentId:'a',message:'offline'});
+ const kept=clearTimelineError(loaded,'a').get('a');
+ assert.deepEqual(kept,{epoch:'e',items:[row(1),row(2)],hasMore:true,error:null});
+ assert.equal(loaded.get('a')?.error,'offline');
+
+ const clean=applyTimelineEvent(new Map(),{type:'snapshot',agentId:'a',epoch:'e',items:[row(1)],hasMore:false});
+ assert.equal(clearTimelineError(clean,'a'),clean);
+ assert.equal(clearTimelineError(clean,'missing'),clean);
+ const other=applyTimelineEvent(errorOnly,{type:'snapshot',agentId:'b',epoch:'e',items:[row(1)],hasMore:false});
+ assert.equal(clearTimelineError(other,'a').has('b'),true,'other agents are untouched');
+});
+test('rowWording words compaction rows from an older server that sends no code',()=>{
+ const t=(key:string)=>key;
+ const w=(item:Partial<ChatItem>)=>rowWording({id:'1',seq:1,kind:'other',text:'',...item} as ChatItem,t);
+ assert.deepEqual(w({kind:'status',text:'Context compacted'}),{label:null,body:'compacted'});
+ assert.deepEqual(w({kind:'status',text:'Compacting context'}),{label:null,body:'compacting'});
+ assert.deepEqual(w({kind:'user',text:'Context compacted'}),{label:null,body:'Context compacted'});
+ assert.deepEqual(w({kind:'assistant',text:'Compacting context'}),{label:null,body:'Compacting context'});
+ assert.deepEqual(w({kind:'status',text:'Context compacted soon'}),{label:null,body:'Context compacted soon'});
+});
+test('the compaction fallback constants are exactly the text the converter produces',()=>{
+ const convert=(status:string)=>toChatItem({item:{type:'compaction',status},seqStart:1,timestamp:'t'} as Parameters<typeof toChatItem>[0]);
+ assert.equal(convert('completed').text,COMPACTED_FALLBACK_TEXT);
+ assert.equal(convert('running').text,COMPACTING_FALLBACK_TEXT);
+ assert.equal(COMPACTED_FALLBACK_TEXT,'Context compacted'); assert.equal(COMPACTING_FALLBACK_TEXT,'Compacting context');
 });

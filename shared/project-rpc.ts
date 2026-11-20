@@ -28,6 +28,9 @@ export const projectWorktreesInputSchema = z.object({
   cwds: z.array(z.string()).max(MAX_WORKTREE_CWDS),
 });
 export const projectWorktreesOutputSchema = z.object({
+  // The answering daemon's Paseo host id (agent and workspace refs carry it as `hostId`). Paths
+  // only mean something on that host. Null when the daemon cannot tell; absent from older servers.
+  hostId: z.string().min(1).nullable().default(null),
   // Zod records discard "__proto__". Validate entries so even that cwd is echoed verbatim.
   worktrees: z.preprocess(
     (value) => value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value) : undefined,
@@ -36,6 +39,11 @@ export const projectWorktreesOutputSchema = z.object({
 });
 export type ProjectWorktreesInput = z.infer<typeof projectWorktreesInputSchema>;
 export type ProjectWorktreesOutput = z.infer<typeof projectWorktreesOutputSchema>;
+
+/** Key of a session folder in the sidebar's worktree map: paths only mean something on one host. */
+export function worktreeKey(hostId: string, cwd: string): string {
+  return `${hostId}\u0000${cwd}`;
+}
 
 export const projectWorktrees = defineRpc({
   name: "project.worktrees",

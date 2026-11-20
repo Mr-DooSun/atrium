@@ -12,9 +12,12 @@ type TimelineEntry = {
     pluginId?: unknown;
     id?: unknown;
     kind?: unknown;
+    messageId?: unknown;
   } | null | undefined;
   seqStart: number;
   timestamp: string;
+  /** Present on projected history entries, absent on live updates. */
+  seqEnd?: number;
 };
 type AgentWithLabels = {
   id: string;
@@ -31,20 +34,40 @@ function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/** Converts a projected history entry or a live timeline event to a display row. */
-export function toChatItem({ item, seqStart, timestamp }: TimelineEntry): ChatItem {
-  const base = { id: String(seqStart), seq: seqStart, at: timestamp };
+/** `text` of a plugin row without pluginId/kind, and of an unknown item without a type. */
+export const PLUGIN_FALLBACK_TEXT = "Plugin";
+export const UNKNOWN_FALLBACK_TEXT = "Unknown timeline item";
+/** `text` of a compaction row; servers before `code` existed sent only this. */
+export const COMPACTED_FALLBACK_TEXT = "Context compacted";
+export const COMPACTING_FALLBACK_TEXT = "Compacting context";
+
+/**
+ * Converts a projected history entry or a live timeline event to a display row. Tool, compaction,
+ * plugin and unknown rows carry structured fields (`toolName`/`status`, `code`) that current
+ * clients word in the user's language. `text` keeps the English line older clients show: the
+ * client bundle comes from the daemon's plugin catalog, so after a plugin update an app still
+ * running the previous bundle can talk to this server until it reloads.
+ */
+export function toChatItem({ item, seqStart, timestamp, seqEnd }: TimelineEntry): ChatItem {
+  const base: Pick<ChatItem, "id" | "seq" | "at" | "projected"> = {
+    id: String(seqStart),
+    seq: seqStart,
+    at: timestamp,
+    ...(typeof seqEnd === "number" ? { projected: true } : {}),
+  };
   switch (item?.type) {
     case "user_message":
       return { ...base, kind: "user", text: stringOrEmpty(item.text) };
-    case "assistant_message":
-      return { ...base, kind: "assistant", text: stringOrEmpty(item.text) };
+    case "assistant_message": {
+      const messageId = stringOrEmpty(item.messageId);
+      return { ...base, kind: "assistant", text: stringOrEmpty(item.text), ...(messageId ? { messageId } : {}) };
+    }
     case "reasoning":
       return { ...base, kind: "reasoning", text: stringOrEmpty(item.text) };
     case "tool_call": {
       const callId = stringOrEmpty(item.callId);
       const toolName = stringOrEmpty(item.name) || undefined;
-      const status = stringOrEmpty(item.status);
+      const status = stringOrEmpty(item.status) || undefined;
       const label = toolName ?? "Tool";
       return {
         ...base,
@@ -52,6 +75,7 @@ export function toChatItem({ item, seqStart, timestamp }: TimelineEntry): ChatIt
         kind: "tool",
         text: status ? `${label} (${status})` : label,
         toolName,
+        status,
       };
     }
     case "todo":
@@ -66,11 +90,9 @@ export function toChatItem({ item, seqStart, timestamp }: TimelineEntry): ChatIt
     case "notification":
       return { ...base, kind: "status", text: stringOrEmpty(item.message) };
     case "compaction":
-      return {
-        ...base,
-        kind: "status",
-        text: item.status === "completed" ? "Context compacted" : "Compacting context",
-      };
+      return item.status === "completed"
+        ? { ...base, kind: "status", text: COMPACTED_FALLBACK_TEXT, code: "compacted" }
+        : { ...base, kind: "status", text: COMPACTING_FALLBACK_TEXT, code: "compacting" };
     case "plugin": {
       const pluginId = stringOrEmpty(item.pluginId);
       const id = stringOrEmpty(item.id);
@@ -78,11 +100,13 @@ export function toChatItem({ item, seqStart, timestamp }: TimelineEntry): ChatIt
         ...base,
         id: pluginId && id ? JSON.stringify([pluginId, id]) : base.id,
         kind: "other",
-        text: [pluginId, stringOrEmpty(item.kind)].filter(Boolean).join(": ") || "Plugin",
+        text: [pluginId, stringOrEmpty(item.kind)].filter(Boolean).join(": ") || PLUGIN_FALLBACK_TEXT,
+        code: "plugin",
       };
     }
     default:
-      return { ...base, kind: "other", text: stringOrEmpty(item?.type) || "Unknown timeline item" };
+      // The raw type name is data, shown under a translated "unknown item" label.
+      return { ...base, kind: "other", text: stringOrEmpty(item?.type) || UNKNOWN_FALLBACK_TEXT, code: "unknown" };
   }
 }
 

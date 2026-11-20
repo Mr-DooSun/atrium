@@ -17,7 +17,23 @@ export const ChatItem = z.object({
   text: z.string(),
   toolName: z.string().optional(),
   at: z.string().optional(),
+  /** Tool call state as the daemon reports it (running, completed, failed, canceled). */
+  status: z.string().optional(),
+  /**
+   * What a row is when the client should word it itself: "compacting", "compacted", "plugin",
+   * "unknown" (see `ChatItemCode`). A plain string on the wire, so a code added by a newer server
+   * never makes an older client reject the whole event; clients show codes they don't know as
+   * an unknown item.
+   */
+  code: z.string().optional(),
+  /** The assistant message a row belongs to, when the daemon gives one. */
+  messageId: z.string().optional(),
+  /** A whole entry from the projected history: never a streaming chunk to join with others. */
+  projected: z.boolean().optional(),
 });
+
+/** Row codes this version knows (`ChatItem.code`). */
+export type ChatItemCode = "compacting" | "compacted" | "plugin" | "unknown";
 
 /** The validated display row shared by snapshots, live updates, and history pages. */
 export type ChatItem = z.infer<typeof ChatItem>;

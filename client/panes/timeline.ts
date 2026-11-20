@@ -1,5 +1,6 @@
 // Per-agent chat rows, folded from `chatTimelines` events and `chatOlder` pages. Pure, so it can
 // be unit tested; the screen keeps one of these maps in state.
+import { COMPACTED_FALLBACK_TEXT, COMPACTING_FALLBACK_TEXT, PLUGIN_FALLBACK_TEXT, UNKNOWN_FALLBACK_TEXT } from "../../shared/chat/convert";
 import type { ChatItem } from "../../shared/chat/rpc";
 
 export interface AgentTimeline {
@@ -75,10 +76,10 @@ export function overlaps(cached: readonly ChatItem[], snapshot: readonly ChatIte
 }
 
 /**
- * Adds a page of older rows fetched with `chatOlder`. `chatOlder` carries no epoch, so the page
- * is kept only if the timeline is still the one the request was made against: same epoch, and
- * (when `beforeSeq` is given) its oldest row is still the one the request paged back from.
- * Otherwise a snapshot replaced the rows mid-flight and the page is discarded.
+ * Adds a page of older rows fetched with `chatOlder`. The request is pinned to the epoch it was
+ * made against, but a snapshot can still replace the rows while it is in flight, so the page is
+ * kept only if the timeline is still that one: same epoch, and (when `beforeSeq` is given) its
+ * oldest row is still the one the request paged back from. Otherwise the page is discarded.
  */
 export function applyOlder(
   state: Timelines,
@@ -96,20 +97,100 @@ export function applyOlder(
 }
 
 /**
- * Rows as shown: a streamed reply arrives as several consecutive assistant rows (one per
- * chunk), so adjacent rows of the same kind among assistant/reasoning are joined into one.
+ * Rows as shown: a reply streamed live arrives as several consecutive assistant rows (one per
+ * chunk), so a chunk is joined onto the row before it when both are the same kind among
+ * assistant/reasoning. History rows (`projected`) are already whole messages from the daemon:
+ * one never absorbs the next, else two separate replies would run together into one paragraph
+ * (and their Markdown with it). Rows of different assistant messages (`messageId`) never join.
  * The raw rows stay in state; the joined row keeps the first chunk's id and the last's seq.
  */
 const JOINED: ReadonlySet<ChatItem["kind"]> = new Set(["assistant", "reasoning"]);
+function continues(last: ChatItem, item: ChatItem): boolean {
+  if (!JOINED.has(item.kind) || last.kind !== item.kind || item.projected) return false;
+  return !(last.messageId && item.messageId && last.messageId !== item.messageId);
+}
 export function displayItems(items: readonly ChatItem[]): ChatItem[] {
   const out: ChatItem[] = [];
   for (const item of items) {
     const last = out[out.length - 1];
-    if (last && JOINED.has(item.kind) && last.kind === item.kind) {
+    if (last && continues(last, item)) {
       out[out.length - 1] = { ...last, seq: item.seq, text: last.text + item.text };
     } else {
       out.push(item);
     }
   }
   return out;
+}
+
+/** Keys `rowWording` asks the translation function for. */
+export type RowWordKey = "tool" | "thinking" | "plugin" | "unknownItem" | "compacting" | "compacted" | "toolRunning" | "toolCompleted" | "toolFailed" | "toolCanceled";
+
+/**
+ * The label and body a non-message row shows, in the user's language. Structured fields win over
+ * `text` (which keeps an English line for older clients): a tool shows its translated state (its
+ * name is the label, never repeated), a compaction its translated line, a plugin or unknown item
+ * its data under a translated label. A `code` this version doesn't know shows as an unknown item.
+ */
+export function rowWording(item: ChatItem, t: (key: RowWordKey) => string): { label: string | null; body: string } {
+  if (item.kind === "tool") return { label: item.toolName || t("tool"), body: toolStatusText(item.status, t) };
+  if (item.kind === "reasoning") return { label: t("thinking"), body: item.text };
+  switch (item.code) {
+    case undefined:
+      // A server from before `code` sent compaction rows as these English lines only.
+      if (item.kind === "status" && item.text === COMPACTED_FALLBACK_TEXT) return { label: null, body: t("compacted") };
+      if (item.kind === "status" && item.text === COMPACTING_FALLBACK_TEXT) return { label: null, body: t("compacting") };
+      return { label: null, body: item.text };
+    case "compacting":
+    case "compacted":
+      return { label: null, body: t(item.code) };
+    case "plugin":
+      return { label: t("plugin"), body: item.text === PLUGIN_FALLBACK_TEXT ? "" : item.text };
+    default:
+      return { label: t("unknownItem"), body: item.text === UNKNOWN_FALLBACK_TEXT ? "" : item.text };
+  }
+}
+
+/** A tool call's state in the user's language; a state this version doesn't know shows as is. */
+export function toolStatusText(status: string | undefined, t: (key: "toolRunning" | "toolCompleted" | "toolFailed" | "toolCanceled") => string): string {
+  switch (status) {
+    case "running":
+      return t("toolRunning");
+    case "completed":
+      return t("toolCompleted");
+    case "failed":
+      return t("toolFailed");
+    case "canceled":
+    case "cancelled":
+      return t("toolCanceled");
+    default:
+      return status ?? "";
+  }
+}
+
+/**
+ * The line above a pane's rows when something went wrong, or null:
+ * - liveLost: the subscription itself ended (plugin reload, daemon restart). Nothing retries on
+ *   its own, so the pane offers a retry (rows already loaded survive it).
+ * - reconnecting: the server reported an error but the subscription lives on, and the server
+ *   retries by itself (1, 2, 5, 10, 30 s); rows are already showing, so no button.
+ * - loadFailed: the same before any row arrived: the first load failed, retry offered.
+ */
+export function errorBanner(lost: boolean, error: string | null, hasRows: boolean): "liveLost" | "reconnecting" | "loadFailed" | null {
+  if (lost) return "liveLost";
+  if (error === null) return null;
+  return hasRows ? "reconnecting" : "loadFailed";
+}
+
+/**
+ * The timeline with the agent's error cleared (a retry starts clean); unchanged when it has none.
+ * An entry that only ever held the error (no snapshot yet) is removed, so the pane shows its
+ * loading state again rather than "no messages".
+ */
+export function clearTimelineError(state: Timelines, agentId: string): Timelines {
+  const prev = state.get(agentId);
+  if (!prev || prev.error === null) return state;
+  const next = new Map(state);
+  if (prev.epoch === null && prev.items.length === 0) next.delete(agentId);
+  else next.set(agentId, { ...prev, error: null });
+  return next;
 }
