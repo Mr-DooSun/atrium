@@ -49,5 +49,6 @@ First public release.
 - The toolbox confirmation shows the full command and no longer repeats warnings.
 - Calls to the Paseo CLI pass `--home` explicitly, and displayed paths are shortened to `~` only inside the home folder.
 
+[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.1.0
