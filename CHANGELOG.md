@@ -7,9 +7,19 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-21
+
+Listing and documentation update. The plugin's behavior is unchanged.
+
+### Added
+
+- Simplified Chinese listing: `OVERVIEW.zh-CN.md` and a `zh-CN` name and description in the manifest.
+
 ### Changed
 
 - Rewrote the marketplace listing (`OVERVIEW.md`) to be shorter, with the data access section grouped by network requests, commands, files and safeguards. It also corrects two errors carried over from earlier listings: the Paseo CLI subcommands Atrium runs (`plugin add`, `project ls`, `project delete`, not `plugin install`), and `/mcp` sign-in, which happens in each CLI with the toolbox showing the steps.
+- The one-line description in the manifest and `package.json` now says what the plugin is for instead of listing its features.
+- Replaced the listing images with four screenshots of the real interface, taken with sample data (1600x900 JPG): the agent tree with worktree badges, panes, the plugins screen and the command check before a change. The earlier banner and screenshots are removed, and the README uses the new images.
 
 ## [0.3.0] - 2026-11-21
 
@@ -93,7 +103,8 @@ First public release.
 - The toolbox confirmation shows the full command and no longer repeats warnings.
 - Calls to the Paseo CLI pass `--home` explicitly, and displayed paths are shortened to `~` only inside the home folder.
 
-[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.2.0
