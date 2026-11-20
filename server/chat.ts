@@ -1,7 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { PaseoAgentTimelineHandle, PaseoAgentTimelineSubscription } from "@getpaseo/client";
 import type { PluginServerContext, PluginSubscriptionContext } from "@getpaseo/plugin/server";
 import type { z } from "zod";
 import { computeChatLinks, toChatItem } from "../shared/chat/convert";
@@ -10,9 +9,10 @@ import { chatLinks, chatOlder, chatTimelines, ensureChatDir, type ChatItem } fro
 /** The daemon user's scratch folder for free chat. Not a git repo, so no worktrees. */
 export const CHAT_DIR = join(homedir(), ".paseo-chat");
 
-type TimelinePage = Awaited<ReturnType<PaseoAgentTimelineHandle["refetch"]>>;
+type TimelineHandle = ReturnType<PluginSubscriptionContext["paseo"]["agents"]["ref"]>["timeline"];
+type TimelinePage = Awaited<ReturnType<TimelineHandle["refetch"]>>;
 type ChatEvent = z.infer<typeof chatTimelines.event>;
-type Observation = { stop?: PaseoAgentTimelineSubscription; ready: boolean };
+type Observation = { stop?: ReturnType<TimelineHandle["subscribe"]>; ready: boolean };
 
 const retryDelays = [1000, 2000, 5000, 10_000, 30_000];
 const maxPendingRows = 2000;
@@ -78,7 +78,7 @@ function observeTimeline(
     }
   }
 
-  async function refreshSnapshot(timeline: PaseoAgentTimelineHandle, current: Observation) {
+  async function refreshSnapshot(timeline: TimelineHandle, current: Observation) {
     if (signal.aborted || observation !== current || !current.ready || retryTimer || fetching === current) return;
     fetching = current;
     const requestedGeneration = generation;

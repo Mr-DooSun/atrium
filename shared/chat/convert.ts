@@ -1,8 +1,21 @@
-import type { PaseoAgentTimelineHandle } from "@getpaseo/client";
 import type { ChatItem } from "./rpc";
 
-type TimelinePage = Awaited<ReturnType<PaseoAgentTimelineHandle["refetch"]>>;
-type TimelineEntry = Pick<TimelinePage["entries"][number], "item" | "seqStart" | "timestamp">;
+type TimelineEntry = {
+  item: {
+    type?: string;
+    text?: unknown;
+    callId?: unknown;
+    name?: unknown;
+    status?: unknown;
+    items?: unknown;
+    message?: unknown;
+    pluginId?: unknown;
+    id?: unknown;
+    kind?: unknown;
+  } | null | undefined;
+  seqStart: number;
+  timestamp: string;
+};
 type AgentWithLabels = {
   id: string;
   labels?: Readonly<Record<string, string>>;
@@ -21,8 +34,7 @@ function stringOrEmpty(value: unknown): string {
 /** Converts a projected history entry or a live timeline event to a display row. */
 export function toChatItem({ item, seqStart, timestamp }: TimelineEntry): ChatItem {
   const base = { id: String(seqStart), seq: seqStart, at: timestamp };
-  const type = item?.type;
-  switch (type) {
+  switch (item?.type) {
     case "user_message":
       return { ...base, kind: "user", text: stringOrEmpty(item.text) };
     case "assistant_message":
@@ -70,7 +82,7 @@ export function toChatItem({ item, seqStart, timestamp }: TimelineEntry): ChatIt
       };
     }
     default:
-      return { ...base, kind: "other", text: stringOrEmpty(type) || "Unknown timeline item" };
+      return { ...base, kind: "other", text: stringOrEmpty(item?.type) || "Unknown timeline item" };
   }
 }
 
