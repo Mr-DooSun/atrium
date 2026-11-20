@@ -39,6 +39,8 @@ const en = {
   renameFallback: "Leave blank to use the folder name ({{folder}})",
   save: "Save",
   saving: "Saving…",
+  openInPanes: "Open in panes",
+  paneDrag: "Drop on a pane to open",
 };
 
 const zhCN = {
@@ -78,6 +80,8 @@ const zhCN = {
   renameFallback: "留空以使用文件夹名称（{{folder}}）",
   save: "保存",
   saving: "正在保存…",
+  openInPanes: "在分屏中打开",
+  paneDrag: "拖放到分屏中打开",
 };
 
 const ptBR = {
@@ -117,6 +121,8 @@ const ptBR = {
   renameFallback: "Deixe em branco para usar o nome da pasta ({{folder}})",
   save: "Salvar",
   saving: "Salvando…",
+  openInPanes: "Abrir nos painéis",
+  paneDrag: "Solte em um painel para abrir",
 };
 
 export const sidebarText = defineTranslations({
@@ -159,6 +165,8 @@ export const sidebarText = defineTranslations({
       renameFallback: "비워 두면 폴더 이름({{folder}})으로 돌아갑니다",
       save: "저장",
       saving: "저장 중…",
+      openInPanes: "패널에서 열기",
+      paneDrag: "패널에 놓아서 열기",
     },
     ja: {
       startChat: "新しいチャットを開始",
@@ -197,6 +205,8 @@ export const sidebarText = defineTranslations({
       renameFallback: "空欄にするとフォルダー名（{{folder}}）に戻ります",
       save: "保存",
       saving: "保存中…",
+      openInPanes: "ペインで開く",
+      paneDrag: "ペインにドロップして開く",
     },
     "zh-CN": zhCN,
     zh: zhCN,
@@ -237,6 +247,8 @@ export const sidebarText = defineTranslations({
       renameFallback: "Déjalo en blanco para usar el nombre de la carpeta ({{folder}})",
       save: "Guardar",
       saving: "Guardando…",
+      openInPanes: "Abrir en paneles",
+      paneDrag: "Suelta en un panel para abrir",
     },
     fr: {
       startChat: "Démarrer une discussion",
@@ -275,6 +287,8 @@ export const sidebarText = defineTranslations({
       renameFallback: "Laissez vide pour utiliser le nom du dossier ({{folder}})",
       save: "Enregistrer",
       saving: "Enregistrement…",
+      openInPanes: "Ouvrir dans les volets",
+      paneDrag: "Déposez sur un volet pour ouvrir",
     },
     "pt-BR": ptBR,
     pt: ptBR,
@@ -315,6 +329,8 @@ export const sidebarText = defineTranslations({
       renameFallback: "Оставьте поле пустым, чтобы использовать имя папки ({{folder}})",
       save: "Сохранить",
       saving: "Сохранение…",
+      openInPanes: "Открыть в панелях",
+      paneDrag: "Перетащите на панель, чтобы открыть",
     },
     ar: {
       startChat: "بدء محادثة جديدة",
@@ -353,6 +369,8 @@ export const sidebarText = defineTranslations({
       renameFallback: "اتركه فارغًا لاستخدام اسم المجلد ({{folder}})",
       save: "حفظ",
       saving: "جارٍ الحفظ…",
+      openInPanes: "فتح في الألواح",
+      paneDrag: "أفلت على لوحة للفتح",
     },
   },
 });
