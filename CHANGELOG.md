@@ -7,6 +7,8 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-21
+
 ### Fixed
 
 - Managed installs and updates now build without local development dependencies.
@@ -53,6 +55,7 @@ First public release.
 - The toolbox confirmation shows the full command and no longer repeats warnings.
 - Calls to the Paseo CLI pass `--home` explicitly, and displayed paths are shortened to `~` only inside the home folder.
 
-[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.1.0
