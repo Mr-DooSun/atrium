@@ -36,6 +36,7 @@ features or behavior changes go in a minor release (0.2.0).
 - A closed pane's width came back when the same session was reopened before a restart. Sessions whose parent links form a loop could disappear from the panes screen.
 - Worktree badges disappeared with git older than 2.36.
 - With more than one host connected, a remote session could show the worktree badge of a local folder with the same path. Badges are now looked up per host, and are not shown when the plugin cannot tell which host it runs on.
+- The Claude Code installed list showed project and local installs from every project on the machine, often many times over. It now shows user-wide installs, plus the project and local installs of the open project, and the catalog marks a plugin installed only on that basis.
 
 ## [0.2.1] - 2026-11-21
 
