@@ -6,6 +6,13 @@ Choose it under Settings, Sidebar, Sidebar view, "Atrium". It replaces the sideb
 
 Each workspace row keeps its status, branch and diff counts, and shows how many agents below it are running. A running workspace or agent has a spinning ring; agents waiting for permission are amber and failed ones red. Each row starts with its provider's mark (Claude Code, Codex, Antigravity; a custom provider that extends one uses its mark) and ends with its status. Rows fold and unfold, and a folded row shows how many entries it hides. Hovering a workspace row shows a pencil to give it a display name; the name is saved as the workspace's Paseo title, so other clients show it too, and an empty name goes back to the folder name.
 
+Worktrees:
+
+- Session rows show which git worktree and branch the session works in, so when you split work across several `git worktree` checkouts you can tell at a glance which session runs where.
+- A session in a linked worktree shows a folder icon, its branch and the worktree's folder name, with a thin bar in the worktree's color on the row's left edge. Every session in the same worktree gets the same color wherever it sits in the tree; the order does not change.
+- A session in the project's main checkout shows no badge while it is on the default branch (the remote's `origin/HEAD`, otherwise a local `main`, then `master`), or when no default branch can be found. On any other branch it shows only the branch, in muted gray. A detached HEAD shows the short commit hash with "(detached)", in a linked worktree or the main checkout.
+- The tooltip and accessibility label give the full worktree path. Branches are checked again every 20 seconds, so a session that switches branch updates on its own. A folder outside git, a missing folder, or a host without `git` shows no badge.
+
 Projects:
 
 - A project stays in the tree after its last session is archived, with a row to start a new chat in it.
@@ -57,7 +64,7 @@ The toolbox screens use the same nine languages as the sidebar, following the ap
 
 ## Setup
 
-Requires Paseo 0.16.1 or later. Dragging to reorder is desktop only; mobile uses the long-press menu. The toolbox uses the agent CLIs installed on the daemon host (`claude`, `codex`, `agy`) and the `paseo` CLI; a CLI that is not installed shows as not installed. Usage cards need nothing beyond an account that is configured as a Paseo provider and logged in.
+Requires Paseo 0.16.1 or later. Dragging to reorder is desktop only; mobile uses the long-press menu. The toolbox uses the agent CLIs installed on the daemon host (`claude`, `codex`, `agy`) and the `paseo` CLI; a CLI that is not installed shows as not installed. Worktree badges use `git` on the daemon host and are left out when it is missing. Usage cards need nothing beyond an account that is configured as a Paseo provider and logged in.
 
 ## Data access
 
@@ -72,6 +79,7 @@ Commands it runs on the daemon host (as separate processes, without a shell):
 
 - Each profile's own CLI with that profile's environment: `claude` (`auth status`, `mcp`, `plugin` and `plugin marketplace` commands), `codex` (`login status`, `mcp`, `plugin` and `plugin marketplace` commands) and `agy` (`--version`, `plugin` commands). Listing commands run when a screen opens; changes run only after you confirm. These CLIs may contact their own services, for example to check MCP servers or download plugins.
 - The `paseo` CLI to list projects, remove a project, and list, install, update, enable, disable and remove Paseo plugins.
+- `git` (`rev-parse`, `worktree list`, `symbolic-ref` and `for-each-ref`) in each session's folder to show its worktree and branch in the sidebar and to find the default branch. These are read-only, run against the session's folder rather than any `GIT_DIR` or similar git variables set for the daemon, and each folder's answer is reused for a few seconds.
 - On macOS, `/usr/bin/security find-generic-password` to read an additional Claude account's login from the Keychain.
 
 Files it reads:

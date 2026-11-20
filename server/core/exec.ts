@@ -2,8 +2,8 @@
 import { spawn } from "node:child_process";
 
 export interface ExecOptions {
-  /** Extra environment on top of the daemon's (e.g. CLAUDE_CONFIG_DIR for a profile). */
-  env?: Record<string, string>;
+  /** Overrides for the daemon's environment. An undefined value removes the variable. */
+  env?: NodeJS.ProcessEnv;
   cwd?: string | null;
   timeoutMs?: number;
   /** Text written to stdin, then closed. Stdin is closed immediately otherwise. */

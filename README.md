@@ -4,9 +4,14 @@ A Paseo plugin for working with many agents at once: an agent tree sidebar, usag
 
 ![Atrium agent tree sidebar](assets/screenshot-sidebar.png)
 
+<!-- TODO: capture the sidebar with worktree badges (sessions in two or more linked worktrees plus one session in the main checkout on a branch other than the default branch), save it as assets/screenshot-worktrees.png, then uncomment the line below and add the file to "media" in paseo-plugin.json.
+![Worktree badges in the Atrium sidebar](assets/screenshot-worktrees.png)
+-->
+
 ## Features
 
 - **Agent tree sidebar.** Workspaces and agents as a tree built from Paseo's parent agent records; sub-agents in their own worktrees show under the agent that started them. Drag projects and sessions to reorder them (long-press menu on mobile), rename workspaces, archive sessions, remove projects, and keep project-less chats in a pinned General section.
+- **Worktree badges.** A session in a linked git worktree shows its branch, the worktree's folder name and a colored bar, one color per worktree; a session in the main checkout shows its branch only when it is off the default branch. When you split work across several `git worktree` checkouts you can see at a glance which session runs where.
 - **Usage for additional accounts.** Cards in Paseo's usage panel for each extra Claude or Codex account configured as a Paseo provider: plan, 5-hour, weekly and model-specific limits with reset times, and local token totals.
 - **MCP and plugin toolbox.** `/mcp`, `/plugins` (or `/plugin`) and Command Center items open screens to list, add and remove MCP servers and to browse, install, remove, enable, disable and update plugins for Claude Code, Codex, Antigravity and Paseo, per profile (account). Every change shows the exact command and asks for confirmation first.
 
@@ -18,6 +23,7 @@ See [OVERVIEW.md](OVERVIEW.md) for the full description.
 
 - Paseo 0.16.1 or later.
 - For the toolbox: the agent CLIs you want to manage (`claude`, `codex`, `agy`) and the `paseo` CLI installed on the daemon host.
+- For worktree badges: `git` installed on the daemon host. Without it the sidebar works as usual, just without badges.
 - For usage cards: a Claude or Codex account configured as a Paseo provider (for example a custom provider that extends `claude` with its own `CLAUDE_CONFIG_DIR`) and logged in.
 
 ## Install
@@ -43,7 +49,7 @@ Then choose **Settings → Sidebar → Sidebar view → Atrium** to use the agen
 Atrium runs on the daemon host with your user's permissions and sends no telemetry. In short:
 
 - It sends each additional Claude account's OAuth token to `https://api.anthropic.com/api/oauth/usage` to read that account's limits, and downloads the public catalog from `https://plugins.paseo.sh/index.json`.
-- It runs the `claude`, `codex`, `agy` and `paseo` CLIs (and, on macOS, `/usr/bin/security` to read Claude logins from the Keychain). Changes run only after you confirm.
+- It runs the `claude`, `codex`, `agy`, `paseo` and `git` CLIs (and, on macOS, `/usr/bin/security` to read Claude logins from the Keychain). Changes run only after you confirm.
 - It reads Paseo's provider config, the additional accounts' identity, credential and session-log files, and MCP config files. It writes the sidebar order file, the `~/.paseo-chat` folder, and Antigravity's `mcp_config.json` when you change an Antigravity MCP server.
 
 The complete list of commands, files and network requests is in [OVERVIEW.md, Data access](OVERVIEW.md#data-access). Usage details are in [docs/usage-monitor.md](docs/usage-monitor.md).
