@@ -1,12 +1,13 @@
 // Small building blocks shared by the toolbox screens. Paseo's own rhythm: 8px radii, 36px rows,
 // muted 12px labels, colors from the theme through client/look.ts.
-import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, Text, View, type ViewStyle } from "react-native";
-import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { ActivityIndicator, Image, Pressable, Text, View, type ViewStyle } from "react-native";
+import { Icon, ScrollView, TextInput } from "@getpaseo/plugin/client/ui";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { MCP_SCOPES, type AuthState, type Ecosystem, type McpServer, type Profile, type ProviderKind } from "../../shared/toolbox/types";
 import { ROW, type Palette } from "../look";
 import { providerMark } from "../provider-icons";
+import { avatarColor, initials, type PluginPicture } from "./store-logic";
 import { useToolboxText, type Strings } from "./strings";
 
 export const MONO = "Menlo";
@@ -97,6 +98,7 @@ export function Button({
   tone = "default",
   disabled,
   small,
+  loading,
 }: {
   label: string;
   icon?: string;
@@ -104,6 +106,8 @@ export function Button({
   tone?: Tone;
   disabled?: boolean;
   small?: boolean;
+  /** Shows a spinner in place of the icon and ignores presses. */
+  loading?: boolean;
 }) {
   const { p } = useLook();
   const filled = tone !== "default";
@@ -114,7 +118,7 @@ export function Button({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: !!disabled }}
-      disabled={disabled}
+      disabled={disabled || loading}
       onPress={onPress}
       hitSlop={4}
       style={({ pressed }) => ({
@@ -131,7 +135,7 @@ export function Button({
         opacity: disabled ? 0.45 : filled && pressed ? 0.85 : 1,
       })}
     >
-      {icon ? <Icon name={icon} size={small ? 13 : 14} color={fg} /> : null}
+      {loading ? <ActivityIndicator size="small" color={fg} /> : icon ? <Icon name={icon} size={small ? 13 : 14} color={fg} /> : null}
       <Text style={{ color: fg, fontSize: small ? 12 : 13, fontWeight: filled ? "600" : "400" }}>
         {label}
       </Text>
@@ -714,6 +718,182 @@ export function ScopeBasis({ cwd }: { cwd: string | null }) {
       <Icon name={name ? "FolderOpen" : "Globe"} size={13} color={p.muted} />
       <Text numberOfLines={2} style={{ flex: 1, color: p.muted, fontSize: 12 }}>
         {name ? t.scope.basis(name) : t.scope.noProject}
+      </Text>
+    </View>
+  );
+}
+
+// ---- Store pieces -------------------------------------------------------------------------------
+
+export { avatarColor, initials, type PluginPicture };
+
+/** Square plugin icon; the catalog's picture when it has one that loads, else tinted initials. */
+export function PluginAvatar({ name, picture, size = 40 }: { name: string; picture?: PluginPicture | null; size?: number }) {
+  const { p } = useLook();
+  const [broken, setBroken] = useState(false);
+  const radius = Math.round(size * 0.24);
+  const frame: ViewStyle = {
+    width: size,
+    height: size,
+    borderRadius: radius,
+    borderWidth: 1,
+    borderColor: p.guide,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  };
+  if (picture && !broken) {
+    if (picture.kind === "url" && /^https:\/\//i.test(picture.url)) {
+      return (
+        <View style={[frame, { backgroundColor: p.hover }]}>
+          <Image
+            source={{ uri: picture.url }}
+            onError={() => setBroken(true)}
+            accessibilityIgnoresInvertColors
+            style={{ width: size, height: size }}
+            resizeMode="cover"
+          />
+        </View>
+      );
+    }
+    if (picture.kind === "svg") {
+      return (
+        <View style={[frame, { backgroundColor: p.hover }]}>
+          <Icon icon={{ svg: picture.svg }} size={Math.round(size * 0.62)} color={p.foreground} />
+        </View>
+      );
+    }
+  }
+  const color = avatarColor(p, name);
+  return (
+    <View style={[frame, { backgroundColor: `${color}26`, borderColor: `${color}55` }]}>
+      <Text style={{ color, fontSize: Math.round(size * (initials(name).length > 1 ? 0.36 : 0.44)), fontWeight: "700" }}>
+        {initials(name)}
+      </Text>
+    </View>
+  );
+}
+
+/** A pill that filters a list; `count` is shown after the label when given. */
+export function Chip({
+  label,
+  count,
+  active,
+  icon,
+  onPress,
+}: {
+  label: string;
+  count?: number | null;
+  active: boolean;
+  icon?: string;
+  onPress(): void;
+}) {
+  const { p } = useLook();
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={count == null ? label : `${label} ${count}`}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        height: 28,
+        paddingHorizontal: 10,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: active ? p.muted : p.guide,
+        backgroundColor: active ? p.selected : pressed ? p.pressed : "transparent",
+      })}
+    >
+      {icon ? <Icon name={icon} size={12} color={active ? p.foreground : p.muted} /> : null}
+      <Text numberOfLines={1} style={{ color: active ? p.foreground : p.muted, fontSize: 12, fontWeight: active ? "600" : "400" }}>
+        {label}
+      </Text>
+      {count == null ? null : <Text style={{ color: p.idle, fontSize: 11 }}>{count}</Text>}
+    </Pressable>
+  );
+}
+
+/** One horizontally scrolling row of chips. */
+export function ChipRow({ children }: { children: ReactNode }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
+      <View style={{ flexDirection: "row", gap: 6 }}>{children}</View>
+    </ScrollView>
+  );
+}
+
+/** Search box with a leading magnifier and a clear button. */
+export function SearchField({
+  value,
+  onChange,
+  placeholder,
+  clearLabel,
+}: {
+  value: string;
+  onChange(text: string): void;
+  placeholder: string;
+  clearLabel: string;
+}) {
+  const { p } = useLook();
+  return (
+    <View
+      style={{
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        height: 36,
+        paddingLeft: 10,
+        paddingRight: 4,
+        borderRadius: RADIUS,
+        borderWidth: 1,
+        borderColor: p.guide,
+      }}
+    >
+      <Icon name="Search" size={14} color={p.muted} />
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={p.idle}
+        autoCapitalize="none"
+        autoCorrect={false}
+        returnKeyType="search"
+        accessibilityLabel={placeholder}
+        style={{ flex: 1, height: 34, color: p.foreground, fontSize: 13 }}
+      />
+      {value ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={clearLabel}
+          onPress={() => onChange("")}
+          hitSlop={6}
+          style={({ pressed }) => ({
+            width: 26,
+            height: 26,
+            borderRadius: RADIUS - 2,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: pressed ? p.pressed : "transparent",
+          })}
+        >
+          <Icon name="X" size={13} color={p.muted} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** Small tag for a category inside a card. */
+export function Tag({ label }: { label: string }) {
+  const { p } = useLook();
+  return (
+    <View style={{ paddingHorizontal: 6, height: 18, borderRadius: 9, backgroundColor: p.hover, justifyContent: "center" }}>
+      <Text numberOfLines={1} style={{ color: p.muted, fontSize: 11 }}>
+        {label}
       </Text>
     </View>
   );

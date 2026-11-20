@@ -181,7 +181,104 @@ export default {
       marketplaceRemove: "Remover marketplace",
       marketplaceUpdate: "Atualizar marketplace"
     },
-    catalogShown: "Mostrando {{shown}} de {{total}} · Por nome",
+    catalogCount: "Mostrando {{shown}} de {{total}}",
+    searchInstalled: "Buscar plugins instalados",
+    featured: "Destaque",
+    official: "Oficial",
+    installScope: "Instalar em",
+    scopeNeedsProject: "Os escopos de projeto exigem um projeto. Abra /plugins a partir de um agente para usá-los.",
+    source: {
+      button: "Instalar de uma origem",
+      title: "Instalar de uma origem",
+      kind: "Origem",
+      kinds: {
+        git: "Git",
+        npm: "npm",
+        local: "Pasta local",
+        marketplace: "Marketplace"
+      },
+      valueLabel: {
+        git: "Repositório",
+        npm: "Pacote",
+        local: "Caminho da pasta",
+        marketplace: "Origem do marketplace"
+      },
+      valuePlaceholder: {
+        git: "owner/repo ou https://…",
+        npm: "@scope/package",
+        local: "/absolute/path/to/plugin",
+        marketplace: "owner/repo, URL ou caminho"
+      },
+      invalidValue: {
+        git: "Informe um repositório sem espaços",
+        npm: "Informe um nome de pacote npm válido",
+        local: "Informe um caminho absoluto",
+        marketplace: "Informe uma origem de marketplace sem espaços"
+      },
+      plugin: "Nome do plugin",
+      pluginPlaceholder: "my-plugin",
+      ref: "Branch, tag ou commit (opcional)",
+      refPlaceholder: "main",
+      refNote: "Um SHA de commit completo fixa a instalação nessa revisão.",
+      version: "Versão ou tag (opcional)",
+      versionPlaceholder: "latest",
+      path: "Pasta do plugin na origem (opcional)",
+      pathPlaceholder: "plugins/my-plugin",
+      review: "Revisar comando"
+    },
+    installs: "Instalações: {{n}}",
+    clearSearch: "Limpar busca",
+    clearFilters: "Limpar busca e filtros",
+    filterEmpty: "Nenhum plugin corresponde à busca e aos filtros",
+    updateTo: "Atualizar para {{version}}",
+    filters: {
+      all: "Todos",
+      updates: "Atualizações",
+      errors: "Com erro",
+      enabled: "Ativados",
+      disabled: "Desativados"
+    },
+    sort: {
+      name: "Nome",
+      attention: "Precisam de atenção",
+      updated: "Atualizados recentemente",
+      installs: "Mais instalados"
+    },
+    state: {
+      dismiss: "Dispensar",
+      running: {
+        install: "Instalando…",
+        update: "Atualizando…",
+        remove: "Removendo…",
+        enable: "Ativando…",
+        disable: "Desativando…"
+      },
+      failed: {
+        install: "Falha ao instalar",
+        update: "Falha ao atualizar",
+        remove: "Falha ao desinstalar",
+        enable: "Falha ao ativar",
+        disable: "Falha ao desativar"
+      }
+    },
+    detail: {
+      title: "Detalhes do plugin",
+      open: "Ver detalhes",
+      noDescription: "Sem descrição",
+      by: "Por {{author}}",
+      author: "Autor",
+      version: "Versão",
+      installedVersion: "Instalada",
+      latestVersion: "Mais recente",
+      updateTo: "Atualizar para",
+      scope: "Escopo",
+      marketplace: "Marketplace",
+      source: "Origem",
+      homepage: "Abrir página inicial",
+      installs: "Instalações",
+      updated: "Atualizado em",
+      license: "Licença"
+    },
     loadMore: "Mostrar mais ({{n}})",
     antigravityBrowseNote: "Explore o marketplace do Antigravity com /plugin no agy. Esta lista mostra os itens encontrados pela caixa de ferramentas.",
     marketplaceAddWarning: "Busca a lista de plugins desta origem.",
@@ -226,7 +323,9 @@ export default {
     nowRunning: "Executando",
     summary: "Sucessos: {{ok}}",
     summarySkipped: "Sucessos: {{ok}} · Falhas: {{failed}} · Ignorados: {{skipped}}",
-    reloadFor: "{{label}}: Recarregue as sessões abertas para aplicar as alterações."
+    reloadFor: "{{label}}: Recarregue as sessões abertas para aplicar as alterações.",
+    background: "Continuar em segundo plano",
+    doneToast: "{{subject}}: concluído"
   },
   diagnostic: {
     agyUpdate: "A CLI agy não documenta um comando para atualizar plugins.",

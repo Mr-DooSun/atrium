@@ -179,7 +179,104 @@ const en = {
       marketplaceRemove: "Remove marketplace",
       marketplaceUpdate: "Update marketplace"
     },
-    catalogShown: "Showing {{shown}} of {{total}} · By name",
+    catalogCount: "Showing {{shown}} of {{total}}",
+    searchInstalled: "Search installed plugins",
+    featured: "Featured",
+    official: "Official",
+    installScope: "Install to",
+    scopeNeedsProject: "Project scopes need a project. Open /plugins from an agent to use them.",
+    source: {
+      button: "Install from source",
+      title: "Install from source",
+      kind: "Source",
+      kinds: {
+        git: "Git",
+        npm: "npm",
+        local: "Local folder",
+        marketplace: "Marketplace"
+      },
+      valueLabel: {
+        git: "Repository",
+        npm: "Package",
+        local: "Folder path",
+        marketplace: "Marketplace source"
+      },
+      valuePlaceholder: {
+        git: "owner/repo or https://…",
+        npm: "@scope/package",
+        local: "/absolute/path/to/plugin",
+        marketplace: "owner/repo, URL, or path"
+      },
+      invalidValue: {
+        git: "Enter a repository without spaces",
+        npm: "Enter a valid npm package name",
+        local: "Enter an absolute path",
+        marketplace: "Enter a marketplace source without spaces"
+      },
+      plugin: "Plugin name",
+      pluginPlaceholder: "my-plugin",
+      ref: "Branch, tag, or commit (optional)",
+      refPlaceholder: "main",
+      refNote: "A full commit SHA pins the install to that revision.",
+      version: "Version or tag (optional)",
+      versionPlaceholder: "latest",
+      path: "Plugin folder in the source (optional)",
+      pathPlaceholder: "plugins/my-plugin",
+      review: "Review command"
+    },
+    installs: "Installs: {{n}}",
+    clearSearch: "Clear search",
+    clearFilters: "Clear search and filters",
+    filterEmpty: "No plugins match the search and filters",
+    updateTo: "Update to {{version}}",
+    filters: {
+      all: "All",
+      updates: "Updates",
+      errors: "Errors",
+      enabled: "Enabled",
+      disabled: "Disabled"
+    },
+    sort: {
+      name: "Name",
+      attention: "Needs attention",
+      updated: "Recently updated",
+      installs: "Most installed"
+    },
+    state: {
+      dismiss: "Dismiss",
+      running: {
+        install: "Installing…",
+        update: "Updating…",
+        remove: "Removing…",
+        enable: "Enabling…",
+        disable: "Disabling…"
+      },
+      failed: {
+        install: "Install failed",
+        update: "Update failed",
+        remove: "Uninstall failed",
+        enable: "Enable failed",
+        disable: "Disable failed"
+      }
+    },
+    detail: {
+      title: "Plugin details",
+      open: "Show details",
+      noDescription: "No description",
+      by: "By {{author}}",
+      author: "Author",
+      version: "Version",
+      installedVersion: "Installed",
+      latestVersion: "Latest",
+      updateTo: "Update to",
+      scope: "Scope",
+      marketplace: "Marketplace",
+      source: "Source",
+      homepage: "Open homepage",
+      installs: "Installs",
+      updated: "Updated",
+      license: "License"
+    },
     loadMore: "Show more ({{n}})",
     antigravityBrowseNote: "Browse the Antigravity marketplace in agy with /plugin. This list shows entries found by Toolbox.",
     marketplaceAddWarning: "Fetches the list of plugins from this source.",
@@ -224,7 +321,9 @@ const en = {
     nowRunning: "Running",
     summary: "Succeeded: {{ok}}",
     summarySkipped: "Succeeded: {{ok}} · Failed: {{failed}} · Skipped: {{skipped}}",
-    reloadFor: "{{label}}: Reload open sessions to apply changes."
+    reloadFor: "{{label}}: Reload open sessions to apply changes.",
+    background: "Continue in background",
+    doneToast: "{{subject}}: Completed"
   },
   diagnostic: {
     agyUpdate: "The agy CLI does not document a plugin update command.",

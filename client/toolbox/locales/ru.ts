@@ -181,7 +181,104 @@ export default {
       marketplaceRemove: "Удалить каталог",
       marketplaceUpdate: "Обновить каталог"
     },
-    catalogShown: "Показано {{shown}} из {{total}} · По имени",
+    catalogCount: "Показано {{shown}} из {{total}}",
+    searchInstalled: "Поиск среди установленных плагинов",
+    featured: "Рекомендуемый",
+    official: "Официальный",
+    installScope: "Установить в",
+    scopeNeedsProject: "Для областей проекта нужен проект. Откройте /plugins из агента, чтобы использовать их.",
+    source: {
+      button: "Установить из источника",
+      title: "Установка из источника",
+      kind: "Источник",
+      kinds: {
+        git: "Git",
+        npm: "npm",
+        local: "Локальная папка",
+        marketplace: "Каталог"
+      },
+      valueLabel: {
+        git: "Репозиторий",
+        npm: "Пакет",
+        local: "Путь к папке",
+        marketplace: "Источник каталога"
+      },
+      valuePlaceholder: {
+        git: "owner/repo или https://…",
+        npm: "@scope/package",
+        local: "/absolute/path/to/plugin",
+        marketplace: "owner/repo, URL или путь"
+      },
+      invalidValue: {
+        git: "Введите репозиторий без пробелов",
+        npm: "Введите допустимое имя пакета npm",
+        local: "Введите абсолютный путь",
+        marketplace: "Введите источник каталога без пробелов"
+      },
+      plugin: "Название плагина",
+      pluginPlaceholder: "my-plugin",
+      ref: "Ветка, тег или коммит (необязательно)",
+      refPlaceholder: "main",
+      refNote: "Полный SHA коммита закрепляет установку на этой ревизии.",
+      version: "Версия или тег (необязательно)",
+      versionPlaceholder: "latest",
+      path: "Папка плагина в источнике (необязательно)",
+      pathPlaceholder: "plugins/my-plugin",
+      review: "Проверить команду"
+    },
+    installs: "Установок: {{n}}",
+    clearSearch: "Очистить поиск",
+    clearFilters: "Сбросить поиск и фильтры",
+    filterEmpty: "Нет плагинов, подходящих под поиск и фильтры",
+    updateTo: "Обновить до {{version}}",
+    filters: {
+      all: "Все",
+      updates: "Обновления",
+      errors: "С ошибками",
+      enabled: "Включённые",
+      disabled: "Отключённые"
+    },
+    sort: {
+      name: "По имени",
+      attention: "Требуют внимания",
+      updated: "Недавно обновлённые",
+      installs: "Самые популярные"
+    },
+    state: {
+      dismiss: "Скрыть",
+      running: {
+        install: "Установка…",
+        update: "Обновление…",
+        remove: "Удаление…",
+        enable: "Включение…",
+        disable: "Отключение…"
+      },
+      failed: {
+        install: "Не удалось установить",
+        update: "Не удалось обновить",
+        remove: "Не удалось удалить",
+        enable: "Не удалось включить",
+        disable: "Не удалось отключить"
+      }
+    },
+    detail: {
+      title: "О плагине",
+      open: "Показать подробности",
+      noDescription: "Нет описания",
+      by: "Автор: {{author}}",
+      author: "Автор",
+      version: "Версия",
+      installedVersion: "Установлена",
+      latestVersion: "Последняя",
+      updateTo: "Обновить до",
+      scope: "Область",
+      marketplace: "Каталог",
+      source: "Источник",
+      homepage: "Открыть сайт",
+      installs: "Установки",
+      updated: "Обновлён",
+      license: "Лицензия"
+    },
     loadMore: "Показать ещё ({{n}})",
     antigravityBrowseNote: "Каталог Antigravity можно просмотреть командой /plugin в agy. Здесь показаны позиции, найденные Toolbox.",
     marketplaceAddWarning: "Загружает список плагинов из этого источника.",
@@ -226,7 +323,9 @@ export default {
     nowRunning: "Выполняется",
     summary: "Успешно: {{ok}}",
     summarySkipped: "Успешно: {{ok}} · Ошибок: {{failed}} · Пропущено: {{skipped}}",
-    reloadFor: "{{label}}: перезагрузите открытые сеансы, чтобы применить изменения."
+    reloadFor: "{{label}}: перезагрузите открытые сеансы, чтобы применить изменения.",
+    background: "Продолжить в фоне",
+    doneToast: "{{subject}}: готово"
   },
   diagnostic: {
     agyUpdate: "В CLI agy нет документированной команды обновления плагинов.",

@@ -181,7 +181,104 @@ export default {
       marketplaceRemove: "Quitar mercado",
       marketplaceUpdate: "Actualizar mercado"
     },
-    catalogShown: "Se muestran {{shown}} de {{total}} · Por nombre",
+    catalogCount: "Se muestran {{shown}} de {{total}}",
+    searchInstalled: "Buscar complementos instalados",
+    featured: "Destacado",
+    official: "Oficial",
+    installScope: "Instalar en",
+    scopeNeedsProject: "Los ámbitos de proyecto requieren un proyecto. Abre /plugins desde un agente para usarlos.",
+    source: {
+      button: "Instalar desde un origen",
+      title: "Instalar desde un origen",
+      kind: "Origen",
+      kinds: {
+        git: "Git",
+        npm: "npm",
+        local: "Carpeta local",
+        marketplace: "Mercado"
+      },
+      valueLabel: {
+        git: "Repositorio",
+        npm: "Paquete",
+        local: "Ruta de la carpeta",
+        marketplace: "Origen del mercado"
+      },
+      valuePlaceholder: {
+        git: "owner/repo o https://…",
+        npm: "@scope/package",
+        local: "/absolute/path/to/plugin",
+        marketplace: "owner/repo, URL o ruta"
+      },
+      invalidValue: {
+        git: "Introduce un repositorio sin espacios",
+        npm: "Introduce un nombre de paquete npm válido",
+        local: "Introduce una ruta absoluta",
+        marketplace: "Introduce un origen de mercado sin espacios"
+      },
+      plugin: "Nombre del complemento",
+      pluginPlaceholder: "my-plugin",
+      ref: "Rama, etiqueta o commit (opcional)",
+      refPlaceholder: "main",
+      refNote: "Un SHA de commit completo fija la instalación a esa revisión.",
+      version: "Versión o etiqueta (opcional)",
+      versionPlaceholder: "latest",
+      path: "Carpeta del complemento en el origen (opcional)",
+      pathPlaceholder: "plugins/my-plugin",
+      review: "Revisar comando"
+    },
+    installs: "Instalaciones: {{n}}",
+    clearSearch: "Borrar búsqueda",
+    clearFilters: "Borrar búsqueda y filtros",
+    filterEmpty: "Ningún complemento coincide con la búsqueda y los filtros",
+    updateTo: "Actualizar a {{version}}",
+    filters: {
+      all: "Todos",
+      updates: "Actualizaciones",
+      errors: "Con errores",
+      enabled: "Activados",
+      disabled: "Desactivados"
+    },
+    sort: {
+      name: "Nombre",
+      attention: "Requieren atención",
+      updated: "Actualizados recientemente",
+      installs: "Más instalados"
+    },
+    state: {
+      dismiss: "Descartar",
+      running: {
+        install: "Instalando…",
+        update: "Actualizando…",
+        remove: "Quitando…",
+        enable: "Activando…",
+        disable: "Desactivando…"
+      },
+      failed: {
+        install: "Error al instalar",
+        update: "Error al actualizar",
+        remove: "Error al desinstalar",
+        enable: "Error al activar",
+        disable: "Error al desactivar"
+      }
+    },
+    detail: {
+      title: "Detalles del complemento",
+      open: "Ver detalles",
+      noDescription: "Sin descripción",
+      by: "Por {{author}}",
+      author: "Autor",
+      version: "Versión",
+      installedVersion: "Instalada",
+      latestVersion: "Última",
+      updateTo: "Actualizar a",
+      scope: "Ámbito",
+      marketplace: "Mercado",
+      source: "Origen",
+      homepage: "Abrir página web",
+      installs: "Instalaciones",
+      updated: "Actualizado",
+      license: "Licencia"
+    },
     loadMore: "Mostrar más ({{n}})",
     antigravityBrowseNote: "Explora el mercado de Antigravity con /plugin en agy. Aquí se muestran las entradas encontradas por la caja de herramientas.",
     marketplaceAddWarning: "Obtiene la lista de complementos de este origen.",
@@ -226,7 +323,9 @@ export default {
     nowRunning: "En ejecución",
     summary: "Correctos: {{ok}}",
     summarySkipped: "Correctos: {{ok}} · Fallidos: {{failed}} · Omitidos: {{skipped}}",
-    reloadFor: "{{label}}: Recarga las sesiones abiertas para aplicar los cambios."
+    reloadFor: "{{label}}: Recarga las sesiones abiertas para aplicar los cambios.",
+    background: "Continuar en segundo plano",
+    doneToast: "{{subject}}: completado"
   },
   diagnostic: {
     agyUpdate: "La CLI agy no documenta un comando para actualizar complementos.",

@@ -12,6 +12,7 @@ import type {
   McpAddInput,
   McpServer,
   PluginAction,
+  PluginSourceInput,
 } from "../../shared/toolbox/types";
 
 /** What an adapter needs to run its CLI as one profile (one account). */
@@ -45,6 +46,8 @@ export interface PluginEcosystemAdapter {
     pluginId: string,
     marketplace: string | null,
     cwd?: string | null,
+    /** Validated against ECOSYSTEM_CAPS[eco].scopes by the handler; null = CLI default. */
+    scope?: string | null,
   ): Promise<ActionPreview>;
   runAction(
     profile: ProfileRuntime | null,
@@ -52,12 +55,18 @@ export interface PluginEcosystemAdapter {
     pluginId: string,
     marketplace: string | null,
     cwd?: string | null,
+    scope?: string | null,
   ): Promise<CommandResult>;
   runMarketplaceAction(
     profile: ProfileRuntime | null,
     action: MarketplaceAction,
     source: string,
   ): Promise<CommandResult>;
+  /** Direct install from ECOSYSTEM_CAPS[eco].sources. Must validate `source` and not mutate. */
+  previewSource?(profile: ProfileRuntime | null, source: PluginSourceInput, cwd?: string | null): Promise<ActionPreview>;
+  installSource?(profile: ProfileRuntime | null, source: PluginSourceInput, cwd?: string | null): Promise<CommandResult>;
+  /** What runMarketplaceAction would run. Must not mutate. */
+  previewMarketplaceAction?(profile: ProfileRuntime | null, action: MarketplaceAction, source: string): Promise<ActionPreview>;
   /** Installed plugin id → version/revision an update would bring. Omit if the CLI cannot tell. */
   checkUpdates?(profile: ProfileRuntime | null, cwd?: string | null): Promise<Map<string, string>>;
 }
