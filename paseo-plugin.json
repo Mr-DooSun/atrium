@@ -2,6 +2,12 @@
   "id": "atrium",
   "name": "Atrium",
   "description": "Run many Paseo agents without losing track: sub-agents nest under their parent and chats open side by side.",
+  "translations": {
+    "zh-CN": {
+      "name": "Atrium",
+      "description": "在 Paseo 中同时运行多个代理也不迷路：子代理嵌套在父代理之下，聊天并排打开。"
+    }
+  },
   "icon": "assets/icon.png",
   "media": [
     "assets/hero-dark-1600.jpg",
