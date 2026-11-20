@@ -7,6 +7,10 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+### Changed
+
+- Rewrote the marketplace listing (`OVERVIEW.md`) to be shorter, with the data access section grouped by network requests, commands, files and safeguards. It also corrects two errors carried over from earlier listings: the Paseo CLI subcommands Atrium runs (`plugin add`, `project ls`, `project delete`, not `plugin install`), and `/mcp` sign-in, which happens in each CLI with the toolbox showing the steps.
+
 ## [0.3.0] - 2026-11-21
 
 ### Added

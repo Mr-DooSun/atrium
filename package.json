@@ -2,7 +2,7 @@
   "name": "atrium",
   "version": "0.3.0",
   "private": true,
-  "description": "Paseo plugin: nested agent tree sidebar, usage and token monitor for additional Claude and Codex accounts, and an MCP and plugin toolbox.",
+  "description": "Run many Paseo agents without losing track: sub-agents nest under their parent and chats open side by side.",
   "license": "MIT",
   "repository": {
     "type": "git",

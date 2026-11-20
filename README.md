@@ -2,9 +2,13 @@
 
 A Paseo plugin for working with many agents at once: an agent tree sidebar, usage cards for additional Claude and Codex accounts, and `/mcp` and `/plugins` screens for every configured agent CLI.
 
-![Atrium agent tree sidebar](assets/screenshot-sidebar.png)
+![Atrium agent tree sidebar with worktree badges](assets/listing-01-agent-tree.jpg)
 
-![Worktree badges in the Atrium sidebar](assets/screenshot-worktrees.png)
+![Many agent chats side by side in Panes](assets/listing-02-panes.jpg)
+
+![Plugin catalogs in the toolbox](assets/listing-03-plugins.jpg)
+
+![Install review showing the exact command](assets/listing-04-install-review.jpg)
 
 ## Features
 
@@ -50,7 +54,7 @@ Atrium runs on the daemon host with your user's permissions and sends no telemet
 - It runs the `claude`, `codex`, `agy`, `paseo` and `git` CLIs (and, on macOS, `/usr/bin/security` to read Claude logins from the Keychain). Changes run only after you confirm.
 - It reads Paseo's provider config, the additional accounts' identity, credential and session-log files, and MCP config files. It writes the sidebar order file, the `~/.paseo-chat` folder, and Antigravity's `mcp_config.json` when you change an Antigravity MCP server.
 
-The complete list of commands, files and network requests is in [OVERVIEW.md, Data access](OVERVIEW.md#data-access). Usage details are in [docs/usage-monitor.md](docs/usage-monitor.md).
+The complete list of commands, files and network requests is in [OVERVIEW.md, Data access](OVERVIEW.md#data-access-and-limits). Usage details are in [docs/usage-monitor.md](docs/usage-monitor.md).
 
 ## Development
 

@@ -1,16 +1,19 @@
 {
   "id": "atrium",
   "name": "Atrium",
-  "description": "Nested agent tree sidebar with worktree badges, many chats side by side in panes, usage and token monitor for additional Claude and Codex accounts, and an MCP and plugin toolbox.",
+  "description": "Run many Paseo agents without losing track: sub-agents nest under their parent and chats open side by side.",
+  "translations": {
+    "zh-CN": {
+      "name": "Atrium",
+      "description": "在 Paseo 中同时运行多个代理，也能理清头绪：子代理嵌套在父代理之下，聊天可以并排打开。"
+    }
+  },
   "icon": "assets/icon.png",
   "media": [
-    "assets/hero-dark-1600.jpg",
-    "assets/screenshot-sidebar.png",
-    "assets/screenshot-panes.png",
-    "assets/screenshot-worktrees.png",
-    "assets/screenshot-plugins.png",
-    "assets/screenshot-confirm.png",
-    "assets/screenshot-reorder.png"
+    "assets/listing-01-agent-tree.jpg",
+    "assets/listing-02-panes.jpg",
+    "assets/listing-03-plugins.jpg",
+    "assets/listing-04-install-review.jpg"
   ],
   "requirements": {
     "paseo": ">=0.16.1"
