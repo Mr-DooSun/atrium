@@ -1,6 +1,7 @@
 // Per-agent chat rows, folded from `chatTimelines` events and `chatOlder` pages. Pure, so it can
 // be unit tested; the screen keeps one of these maps in state.
 import { COMPACTED_FALLBACK_TEXT, COMPACTING_FALLBACK_TEXT, PLUGIN_FALLBACK_TEXT, UNKNOWN_FALLBACK_TEXT } from "../../shared/chat/convert";
+import type { PluginHostSummary } from "@getpaseo/plugin/client";
 import type { ChatItem } from "../../shared/chat/rpc";
 
 export interface AgentTimeline {
@@ -175,11 +176,44 @@ export function toolStatusText(status: string | undefined, t: (key: "toolRunning
  *   retries by itself (1, 2, 5, 10, 30 s); rows are already showing, so no button.
  * - loadFailed: the same before any row arrived: the first load failed, retry offered.
  */
-export function errorBanner(lost: boolean, error: string | null, hasRows: boolean): "liveLost" | "reconnecting" | "loadFailed" | null {
+export function errorBanner(lost: boolean, error: string | null, hasRows: boolean): ErrorBanner {
   if (lost) return "liveLost";
   if (error === null) return null;
   return hasRows ? "reconnecting" : "loadFailed";
 }
+
+export type ErrorBanner = "liveLost" | "reconnecting" | "loadFailed" | null;
+
+/** A host's connection state as the app reports it (`useHosts()`); undefined when not listed. */
+export type HostStatus = PluginHostSummary["status"] | undefined;
+
+/**
+ * Automatic retry after a reconnect, in two steps a pane runs on every render:
+ *
+ * 1. `armAutoRetry`: the pane arms itself once it sees its host in any known state other than
+ *    online (offline, connecting, error, idle), including the state it mounted in, and stays
+ *    armed until the retry is used.
+ * 2. `autoRetryDue`: an armed pane whose subscription ended (liveLost) retries once the host is
+ *    online, after AUTO_RETRY_DELAY_MS (the plugin's server side may still be starting just
+ *    after the host comes back). The order of the two does not matter: the host may come back
+ *    first and the subscription end afterwards, or the other way round.
+ *
+ * Only liveLost: a server error (reconnecting: the server retries on its own) and a first load
+ * that failed (loadFailed) are left alone. A retry remounts the pane's live part unarmed while
+ * the host is online, so if that retry fails too nothing more happens until the host drops and
+ * comes back. A pane the user already retried is connecting, not liveLost, so it is not retried
+ * twice. A host unknown to the app (undefined) never arms.
+ */
+export function armAutoRetry(armed: boolean, status: HostStatus): boolean {
+  return armed || (status !== undefined && status !== "online");
+}
+
+export function autoRetryDue(armed: boolean, status: HostStatus, banner: ErrorBanner): boolean {
+  return armed && status === "online" && banner === "liveLost";
+}
+
+/** How long after the host is back (and the pane lost) the automatic retry waits. */
+export const AUTO_RETRY_DELAY_MS = 1000;
 
 /**
  * The timeline with the agent's error cleared (a retry starts clean); unchanged when it has none.

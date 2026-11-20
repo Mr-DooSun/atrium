@@ -1,14 +1,14 @@
 // One chat column: header (provider, title, status, actions) over the agent's timeline.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, PanResponder, Platform, Pressable, Text, View, type GestureResponderEvent, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
-import { useAgent, usePaseo, useRpc, useSubscription, useTranslation, type AgentRef } from "@getpaseo/plugin/client";
+import { useAgent, useHosts, usePaseo, useRpc, useSubscription, useTranslation, type AgentRef } from "@getpaseo/plugin/client";
 import { FlatList, Icon, Markdown, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { chatOlder, chatTimelines, type ChatItem } from "../../shared/chat/rpc";
 import { panesText } from "../chat-strings";
 import { TITLE_LINE, type Palette } from "../look";
 import { ProviderMark, StatusMark, agentBucket, isAgentTurnActive } from "../marks";
 import { readableOn } from "./layout";
-import { applyOlder, applyTimelineEvent, clearTimelineError, displayItems, errorBanner, rowWording, type AgentTimeline, type Timelines } from "./timeline";
+import { applyOlder, applyTimelineEvent, clearTimelineError, displayItems, errorBanner, AUTO_RETRY_DELAY_MS, armAutoRetry, autoRetryDue, rowWording, type AgentTimeline, type Timelines } from "./timeline";
 
 export interface PaneLink {
   /** Family color shared by every pane of the family. */
@@ -376,6 +376,23 @@ function LiveBody({
   }, [liveError, agent.id]);
   const timelineError = timeline?.error ?? null;
   const banner = errorBanner(lost, timelineError, (timeline?.items.length ?? 0) > 0);
+  // When the host comes back online (daemon restart, network drop), a pane whose subscription
+  // ended reconnects by itself, once (armAutoRetry / autoRetryDue). The arm lives in this body,
+  // so the retry's fresh body starts unarmed and a failing retry does not repeat.
+  const hostStatus = useHosts().find((h) => h.serverId === agent.hostId)?.status;
+  const armed = useRef(false);
+  useEffect(() => {
+    armed.current = armAutoRetry(armed.current, hostStatus);
+  }, [hostStatus]);
+  useEffect(() => {
+    if (!autoRetryDue(armed.current, hostStatus, banner)) return;
+    const timer = setTimeout(() => {
+      armed.current = false;
+      onRetry();
+    }, AUTO_RETRY_DELAY_MS);
+    // Unmounted, or the host dropped again or the pane recovered within the delay: not now.
+    return () => clearTimeout(timer);
+  }, [hostStatus, banner, onRetry]);
   useEffect(() => {
     if (timelineError) console.warn(`[atrium] chat pane ${agent.id}: timeline error: ${timelineError}`);
   }, [timelineError, agent.id]);
