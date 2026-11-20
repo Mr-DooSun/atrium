@@ -4,7 +4,16 @@ import { usePaseo, type AgentRef, type WorkspaceRef } from "@getpaseo/plugin/cli
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { TITLE_LINE, type Palette } from "./look";
 
-export type ArchiveTarget =
+/** Workspaces the archive leaves with no agent; archived right after it. */
+export interface EmptiedWorkspaces {
+  refs: readonly WorkspaceRef[];
+  /** How many of them are worktrees, whose folders the host removes. */
+  worktrees: number;
+}
+
+export const NO_EMPTIED: EmptiedWorkspaces = { refs: [], worktrees: 0 };
+
+export type ArchiveTarget = (
   | {
       kind: "workspace";
       ref: WorkspaceRef;
@@ -13,7 +22,8 @@ export type ArchiveTarget =
       worktree: boolean;
       hasChanges: boolean;
     }
-  | { kind: "agent"; ref: AgentRef };
+  | { kind: "agent"; ref: AgentRef }
+) & { emptied: EmptiedWorkspaces };
 
 export interface ArchiveState {
   confirming: boolean;
@@ -45,6 +55,15 @@ export function useArchive(target: ArchiveTarget | null): ArchiveState {
       } else {
         await paseo.agents.ref(target.ref).archive();
       }
+      // Paseo archives the sub-sessions with their parent but leaves the workspaces they ran
+      // in; without this they would stay in the sidebar as empty rows. The row itself is already
+      // archived here, so a failure on one of these is reported apart and the rest still go.
+      let failed = 0;
+      for (const ref of target.emptied.refs) {
+        const result = await paseo.workspaces.ref(ref).archive().catch(() => ({ error: "failed" }));
+        if (result.error) failed += 1;
+      }
+      if (failed > 0) toast.error(`비게 된 워크스페이스 ${failed}개를 보관하지 못했습니다`);
     };
     run()
       .catch((error: unknown) => {
@@ -102,7 +121,12 @@ export function archiveWarning(target: ArchiveTarget, descendants: number): stri
         : "worktree 폴더가 삭제됩니다",
     );
   }
+  const { refs, worktrees } = target.emptied;
+  if (worktrees > 0) {
+    parts.push(`비게 되는 worktree ${worktrees}개의 폴더도 삭제됩니다 · 푸시하지 않은 변경은 되찾을 수 없습니다`);
+  }
   if (descendants > 0) parts.push(`하위 ${descendants}개도 함께 보관됩니다`);
+  if (refs.length > 0) parts.push(`비게 되는 워크스페이스 ${refs.length}개도 함께 보관됩니다`);
   return parts.length ? parts.join(" · ") : "목록에서 숨기고 보관함으로 옮깁니다";
 }
 

@@ -20,7 +20,7 @@ import { ensureChatDir } from "../shared/chat/rpc";
 import { chatText } from "./chat-strings";
 import { ROW, TITLE_LINE, type Palette } from "./look";
 import { ProviderMark, StatusMark, agentBucket } from "./marks";
-import { ArchiveButton, ArchiveModal, archiveWarning, useArchive, type ArchiveTarget } from "./archive";
+import { ArchiveButton, ArchiveModal, archiveWarning, useArchive, NO_EMPTIED, type ArchiveTarget } from "./archive";
 
 /** Rows shown before "show more"; the list scrolls inside its own box past this. */
 const VISIBLE = 5;
@@ -203,8 +203,8 @@ function ChatRow({
     () =>
       agent
         ? alone
-          ? { kind: "workspace", ref: agent.workspace, rootAgent: reference, worktree: false, hasChanges: false }
-          : { kind: "agent", ref: reference }
+          ? { kind: "workspace", ref: agent.workspace, rootAgent: reference, worktree: false, hasChanges: false, emptied: NO_EMPTIED }
+          : { kind: "agent", ref: reference, emptied: NO_EMPTIED }
         : null,
     [agent?.workspace, reference, alone],
   );

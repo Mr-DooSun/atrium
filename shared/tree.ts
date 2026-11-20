@@ -169,3 +169,36 @@ function push(map: Map<string, string[]>, key: string, value: string) {
   if (list) list.push(value);
   else map.set(key, [value]);
 }
+
+/**
+ * Workspaces left with no agent once `node`'s row is archived: Paseo archives the row's agent
+ * with everything under it, but the workspaces those agents ran in stay behind, empty. A
+ * workspace counts when every agent in it (per `agentWorkspace`) is in the subtree; empty
+ * workspaces placed under the subtree's agents count too. A workspace row's own workspace is
+ * left out, since archiving that row already archives it.
+ */
+export function workspacesEmptiedBy(
+  node: TreeNode,
+  agentWorkspace: ReadonlyMap<string, string>,
+): string[] {
+  const agents = new Set<string>();
+  const candidates = new Set<string>();
+  const walk = (n: TreeNode, top: boolean) => {
+    if (n.kind === "agent") {
+      agents.add(n.key);
+      const workspace = agentWorkspace.get(n.key);
+      if (workspace) candidates.add(workspace);
+    } else {
+      if (!top) candidates.add(n.key);
+      if (n.agentKey) agents.add(n.agentKey);
+    }
+    for (const child of n.children) walk(child, false);
+  };
+  walk(node, true);
+  if (node.kind === "workspace") candidates.delete(node.key);
+  const occupied = new Set<string>();
+  for (const [agent, workspace] of agentWorkspace) {
+    if (!agents.has(agent)) occupied.add(workspace);
+  }
+  return [...candidates].filter((w) => !occupied.has(w));
+}
