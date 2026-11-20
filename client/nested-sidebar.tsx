@@ -15,12 +15,19 @@ import {
 } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plugin";
-import { buildTree, type TreeNode } from "../shared/tree";
+import { buildTree, workspacesEmptiedBy, type TreeNode } from "../shared/tree";
 import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, type Palette } from "./look";
 import { ProviderMark, StatusMark, URGENT, agentBucket, mostUrgent } from "./marks";
 import type { Bucket } from "./look";
 import { ChatSection, useChatDir } from "./chat";
-import { ArchiveButton, ArchiveModal, archiveWarning, useArchive, type ArchiveTarget } from "./archive";
+import {
+  ArchiveButton,
+  ArchiveModal,
+  archiveWarning,
+  useArchive,
+  type ArchiveTarget,
+  type EmptiedWorkspaces,
+} from "./archive";
 import { RenameButton, RenameModal, useRename } from "./rename";
 import { RemoveProjectModal, useRemoveProject } from "./remove-project";
 import { MoveButton, ProjectMenu, ReorderBar, useProjectOrder } from "./project-order";
@@ -849,6 +856,16 @@ function titleStyle(ctx: Ctx, emphasized: boolean) {
 
 // ── Rows ───────────────────────────────────────────────────────────────
 
+/** The workspaces archiving this row would leave empty, so the archive can take them too. */
+function useEmptiedWorkspaces(node: TreeNode, ctx: Ctx): EmptiedWorkspaces {
+  const keys = useMemo(() => new Set(workspacesEmptiedBy(node, ctx.agentWorkspace)), [node, ctx.agentWorkspace]);
+  const refs = useWorkspaces({ where: useCallback((w: PluginWorkspaceSnapshot) => keys.has(w.ref.key), [keys]) });
+  const worktrees = useWorkspaces({
+    where: useCallback((w: PluginWorkspaceSnapshot) => keys.has(w.ref.key) && w.kind === "worktree", [keys]),
+  }).length;
+  return useMemo(() => ({ refs, worktrees }), [refs, worktrees]);
+}
+
 function WorkspaceRow({
   node,
   depth,
@@ -894,6 +911,7 @@ function WorkspaceRow({
       : inWorkspace
     : inWorkspace && !activeAgent;
   const rootProvider = useAgent(rootAgent ?? node.key, (a) => a.provider);
+  const emptied = useEmptiedWorkspaces(node, ctx);
   const target: ArchiveTarget | null = useMemo(
     () =>
       reference && ws
@@ -903,9 +921,10 @@ function WorkspaceRow({
             rootAgent: rootAgent ?? null,
             worktree: ws.kind === "worktree",
             hasChanges: (ws.additions ?? 0) + (ws.deletions ?? 0) > 0,
+            emptied,
           }
         : null,
-    [reference, rootAgent, ws?.kind, ws?.additions, ws?.deletions],
+    [reference, rootAgent, ws?.kind, ws?.additions, ws?.deletions, emptied],
   );
   const archive = useArchive(target);
   const rename = useRename(reference ?? null, ws?.title ?? null);
@@ -923,7 +942,7 @@ function WorkspaceRow({
       state={archive}
       title={ws.label}
       warning={archiveWarning(target, countDescendants(node))}
-      danger={target.kind === "workspace" && target.worktree}
+      danger={(target.kind === "workspace" && target.worktree) || target.emptied.worktrees > 0}
       p={p}
     />
   ) : null;
@@ -1029,9 +1048,10 @@ function AgentRow({
   const active = ctx.view.active.agent?.key === node.key;
   const runningBelow = useRunningBelow(node);
   const below = useUrgentBelow(node, !open);
+  const emptied = useEmptiedWorkspaces(node, ctx);
   const target: ArchiveTarget | null = useMemo(
-    () => (reference ? { kind: "agent", ref: reference } : null),
-    [reference],
+    () => (reference ? { kind: "agent", ref: reference, emptied } : null),
+    [reference, emptied],
   );
   const archive = useArchive(target);
   if (!agent || !reference) return null;
@@ -1043,7 +1063,7 @@ function AgentRow({
       state={archive}
       title={agent.label}
       warning={archiveWarning(target, countDescendants(node))}
-      danger={false}
+      danger={target.emptied.worktrees > 0}
       p={p}
     />
   ) : null;

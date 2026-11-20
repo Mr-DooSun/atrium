@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildTree, type TreeInput, type TreeNode } from "../shared/tree.ts";
+import { buildTree, workspacesEmptiedBy, type TreeInput, type TreeNode } from "../shared/tree.ts";
 
 function input(spec: {
   workspaces: Array<[key: string, project: string, parentAgent?: string]>;
@@ -161,4 +161,42 @@ test("a child started from another project's session is a root of its own projec
     archon: ["w:archonWs"],
     plugin: [{ "w:pluginWs": ["a:worker"] }],
   });
+});
+
+test("archiving a row also takes the workspaces its subtree leaves empty", () => {
+  const spec = input({
+    workspaces: [
+      ["root", "p"],
+      ["wt1", "p"],
+      ["wt2", "p"],
+      ["fresh", "p", "child"],
+    ],
+    agents: [
+      ["lead", "root"],
+      ["child", "wt1", "lead"],
+      ["grand", "wt2", "child"],
+      ["stay", "wt2"],
+    ],
+  });
+  const tree = buildTree(spec);
+  const rootRow = tree[0].roots.find((n) => n.key === "root")!;
+  // The workspace row's own workspace is archived by the row itself; wt2 still holds "stay".
+  assert.deepEqual(workspacesEmptiedBy(rootRow, spec.agentWorkspace).sort(), ["fresh", "wt1"]);
+
+  const childRow = rootRow.children.find((n) => n.key === "child")!;
+  assert.deepEqual(workspacesEmptiedBy(childRow, spec.agentWorkspace).sort(), ["fresh", "wt1"]);
+});
+
+test("an agent row empties its own workspace only when it is the last one there", () => {
+  const spec = input({
+    workspaces: [["w", "p"], ["side", "p"]],
+    agents: [
+      ["x", "w"],
+      ["y", "w"],
+      ["sub", "side", "x"],
+    ],
+  });
+  const row = buildTree(spec)[0].roots[0].children.find((n) => n.key === "x")!;
+  // "y" keeps w alive; "side" only held x's sub-agent.
+  assert.deepEqual(workspacesEmptiedBy(row, spec.agentWorkspace), ["side"]);
 });
