@@ -9,7 +9,7 @@ features or behavior changes go in a minor release (0.2.0).
 
 ### Added
 
-- Plugin icon (`assets/icon.png`) and a store banner (`assets/hero-dark-1600.png`). The manifest now sets `icon` and puts the banner first in `media`. Light and dark icons from 32 to 1024 px, an SVG master and more banner sizes are kept in `design/brand/`, outside the published package.
+- Plugin icon (`assets/icon.png`) and a store banner (`assets/hero-dark-1600.jpg`). The manifest now sets `icon` and puts the banner first in `media`. Light and dark icons from 32 to 1024 px, an SVG master and the banner originals (PNG, light and dark, 800 and 1600 px) are kept in `design/brand/`, outside the published package.
 - Plugin store redesign in `/plugins`: cards with icons (initials when a plugin has none), search, category chips, sort options per ecosystem, a Featured badge, and a detail sheet with version, installs, license, scope, source and homepage.
 - Clear install states on cards and in the detail sheet: installing, updating, removing, enabling and disabling with a spinner; installed; update available; and failures with Retry and Dismiss. A running action can continue in the background.
 - Installed tab filters (All, Updates, Errors, Enabled, Disabled with counts) and a "Needs attention" sort.
