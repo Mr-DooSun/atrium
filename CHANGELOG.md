@@ -7,6 +7,10 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+### Fixed
+
+- Managed installs and updates now build without local development dependencies.
+
 ## [0.2.0] - 2026-11-20
 
 ### Added
