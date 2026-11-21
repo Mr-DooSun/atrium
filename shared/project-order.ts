@@ -1,6 +1,7 @@
 // The sidebar's own order, set by hand: of projects, and of the sessions under each parent at
-// every depth. Kept on the daemon so every client shows the same order. Projects are named by root
-// folder, so a project removed and added again keeps its place; sessions by their entity key.
+// every depth. Kept on the daemon so every client shows the same order. Projects are named by host
+// and root folder (`projectOrderKey`), so a project removed and added again keeps its place, and the
+// same folder on two hosts is two places; sessions by their entity key.
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import type { TreeNode } from "./tree";
@@ -23,8 +24,63 @@ export const setNodeOrder = defineRpc({
   output: z.object({ ok: z.literal(true) }),
 });
 
-/** The group a project's top rows are ordered in. */
-export const rootsGroup = (projectRoot: string) => `project:${projectRoot}`;
+/** The group a project's top rows are ordered in, by its `projectOrderKey` (or, saved before hosts, its root). */
+export const rootsGroup = (projectKey: string) => `project:${projectKey}`;
+
+/**
+ * A project's name in the saved order: its host and root folder. Orders saved before hosts were
+ * told apart name the root folder alone; `upgradeOrder` and `legacyRoot` read those.
+ */
+export const projectOrderKey = (hostId: string, rootPath: string) => JSON.stringify([hostId, rootPath]);
+
+/** The root folder of an order key saved before hosts were told apart; null for a host-named key. */
+export function legacyRoot(key: string): string | null {
+  if (!key.startsWith("[")) return key;
+  try {
+    const value: unknown = JSON.parse(key);
+    if (Array.isArray(value) && value.length === 2 && value.every((v) => typeof v === "string")) return null;
+  } catch {
+    // A folder whose name starts with "[": a legacy key after all.
+  }
+  return key;
+}
+
+/**
+ * The saved project order with each root-only entry (saved before hosts were told apart) replaced
+ * by the shown projects in that folder, on every host, in their shown order, where the saved
+ * order does not already name them. Root-only entries no shown project matches stay as they are.
+ */
+export function upgradeOrder(
+  saved: readonly string[],
+  shown: readonly { key: string; root: string }[],
+): string[] {
+  const named = new Set(saved);
+  const out: string[] = [];
+  for (const entry of saved) {
+    const root = legacyRoot(entry);
+    if (root === null) {
+      out.push(entry);
+      continue;
+    }
+    const matches = shown.filter((s) => s.root === root && !named.has(s.key)).map((s) => s.key);
+    if (matches.length === 0) out.push(entry);
+    for (const key of matches) {
+      out.push(key);
+      named.add(key);
+    }
+  }
+  return out;
+}
+
+/**
+ * The node orders for a project whose top rows are grouped under `group`: when nothing is saved
+ * there yet, the order saved under its root folder alone (before hosts were told apart) stands in.
+ * Its keys name sessions of one host, so it only ever orders that host's rows.
+ */
+export function nodesFor(nodes: NodeOrders, group: string, legacyGroup: string): NodeOrders {
+  if (nodes[group] || !nodes[legacyGroup]) return nodes;
+  return { ...nodes, [group]: nodes[legacyGroup] };
+}
 
 export const setProjectOrder = defineRpc({
   name: "project.order.set",

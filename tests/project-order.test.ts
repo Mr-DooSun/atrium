@@ -1,6 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyOrder, dropIndex, move, orderTree, placeAt } from "../shared/project-order.ts";
+import {
+  applyOrder,
+  dropIndex,
+  legacyRoot,
+  move,
+  nodesFor,
+  orderTree,
+  placeAt,
+  projectOrderKey,
+  upgradeOrder,
+} from "../shared/project-order.ts";
 import type { TreeNode } from "../shared/tree.ts";
 
 const id = (s: string) => s;
@@ -89,4 +99,53 @@ test("dropIndex passes a long block once the pointer passes its row", () => {
   assert.equal(dropIndex(blocks, "c", -380), 2); // row middle 80: still below b's row
   assert.equal(dropIndex(blocks, "c", -401), 1); // above b's row: lands before b
   assert.equal(dropIndex(blocks, "c", -441), 0); // above a's row
+});
+
+test("the same folder on two hosts gets two order keys", () => {
+  assert.notEqual(projectOrderKey("local", "/repo"), projectOrderKey("remote", "/repo"));
+  assert.equal(legacyRoot(projectOrderKey("local", "/repo")), null);
+  assert.equal(legacyRoot("/repo"), "/repo");
+  assert.equal(legacyRoot("[odd]/folder"), "[odd]/folder");
+});
+
+test("a root-only saved entry stands for that folder on every host, in place", () => {
+  const a = projectOrderKey("h1", "/a");
+  const b1 = projectOrderKey("h1", "/b");
+  const b2 = projectOrderKey("h2", "/b");
+  const shown = [
+    { key: a, root: "/a" },
+    { key: b1, root: "/b" },
+    { key: b2, root: "/b" },
+  ];
+  assert.deepEqual(upgradeOrder(["/b", "/a", "/gone"], shown), [b1, b2, a, "/gone"]);
+});
+
+test("host-named entries win over the root-only entry of the same folder", () => {
+  const b1 = projectOrderKey("h1", "/b");
+  const b2 = projectOrderKey("h2", "/b");
+  const shown = [
+    { key: b1, root: "/b" },
+    { key: b2, root: "/b" },
+  ];
+  assert.deepEqual(upgradeOrder([b2, "/b"], shown), [b2, b1]);
+});
+
+test("two hosts' projects in one folder move apart", () => {
+  const b1 = projectOrderKey("h1", "/b");
+  const b2 = projectOrderKey("h2", "/b");
+  const a = projectOrderKey("h1", "/a");
+  const saved = upgradeOrder(["/b", "/a"], [
+    { key: a, root: "/a" },
+    { key: b1, root: "/b" },
+    { key: b2, root: "/b" },
+  ]);
+  assert.deepEqual(move([b1, b2, a], saved, b2, 1), [b1, a, b2]);
+});
+
+test("a project's rows fall back to the order saved under its folder alone", () => {
+  const legacy = { "project:/b": ["x", "y"] };
+  const group = `project:${projectOrderKey("h1", "/b")}`;
+  assert.deepEqual(nodesFor(legacy, group, "project:/b")[group], ["x", "y"]);
+  const both = { ...legacy, [group]: ["y"] };
+  assert.equal(nodesFor(both, group, "project:/b"), both);
 });
