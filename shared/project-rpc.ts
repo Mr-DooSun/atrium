@@ -45,6 +45,14 @@ export function worktreeKey(hostId: string, cwd: string): string {
   return `${hostId}\u0000${cwd}`;
 }
 
+/**
+ * Which checkout a session works in, as far as its badge tells: the host, the worktree folder and
+ * what is checked out there. Two sessions with the same key show the same badge.
+ */
+export function checkoutKey(hostId: string, info: Extract<WorktreeInfo, { kind: "git" }>): string {
+  return JSON.stringify([hostId, info.worktreePath, info.detached ? (info.head ?? "") : (info.branch ?? info.head ?? "")]);
+}
+
 export const projectWorktrees = defineRpc({
   name: "project.worktrees",
   input: projectWorktreesInputSchema,

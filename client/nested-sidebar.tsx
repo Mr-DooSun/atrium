@@ -18,7 +18,7 @@ import {
 } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plugin";
-import { MAX_WORKTREE_CWDS, projectWorktrees, worktreeKey, type WorktreeInfo } from "../shared/project-rpc";
+import { MAX_WORKTREE_CWDS, checkoutKey, projectWorktrees, worktreeKey, type WorktreeInfo } from "../shared/project-rpc";
 import { buildTree, workspacesEmptiedBy, type TreeNode } from "../shared/tree";
 import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, worktreeBadge, type Palette } from "./look";
 import { ProviderMark, StatusMark, URGENT, WorktreeBadge, WorktreeBar, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
@@ -91,6 +91,12 @@ interface Ctx {
   view: PluginSidebarViewProps;
   /** The host's name, when more than one host is configured (the sidebar is then split by host); else null. */
   hostLabel(hostId: string): string | null;
+  /**
+   * The git checkout a row's session works in (worktree folder and branch), or null when it shows
+   * no badge. A row in the same checkout as the row just above it (its parent or the sibling before
+   * it) leaves the badge to that row and keeps only the color bar.
+   */
+  rowWorktree(nodeKey: string): string | null;
   /** The drag group a project header moves in: its host's section, or all projects with one host. */
   projectsGroup(projectKey: string): string;
   p: Palette;
@@ -295,6 +301,23 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   }, [workspaceOrder, agentOrder, byProject, byCreator, byWorkspace, byParent]);
 
   const worktrees = useWorktrees();
+  const agentsByCwd = useAgents({ where: visibleAgent, groupBy: (a) => a.cwd });
+  const workspacesByDir = useWorkspaces({ where: inTree, groupBy: (w) => w.directory });
+  const rowWorktrees = useMemo(() => {
+    const map = new Map<string, string>();
+    const add = (groups: readonly { key: string; items: readonly { key: string; hostId: string }[] }[]) => {
+      for (const group of groups) {
+        for (const ref of group.items) {
+          const info = worktrees.get(worktreeKey(ref.hostId, group.key));
+          if (info && worktreeBadge(info)) map.set(ref.key, checkoutKey(ref.hostId, info));
+        }
+      }
+    };
+    add(agentsByCwd);
+    add(workspacesByDir);
+    return map;
+  }, [agentsByCwd, workspacesByDir, worktrees]);
+  const rowWorktree = useCallback((nodeKey: string) => rowWorktrees.get(nodeKey) ?? null, [rowWorktrees]);
   const projectRefs = useMemo(() => new Map(projects.map((r) => [r.key, r])), [projects]);
   // The saved order names projects by host and root folder, which outlive the project's id; the
   // same folder on two hosts is two projects with places of their own.
@@ -666,6 +689,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   const ctx: Ctx = {
     view,
     hostLabel,
+    rowWorktree,
     projectsGroup: projectsGroupOf,
     p,
     compact: view.layout.compact,
@@ -821,6 +845,7 @@ function ProjectBlock({ project, ctx }: { project: { projectKey: string; roots: 
               group={group}
               depth={0}
               place={null}
+              above={i > 0 ? ctx.rowWorktree(project.roots[i - 1].key) : null}
               trail={{ continues: [], last: i === project.roots.length - 1 }}
               ctx={ctx}
             />
@@ -854,6 +879,7 @@ function Node({
   group,
   depth,
   place,
+  above,
   trail,
   ctx,
 }: {
@@ -862,10 +888,14 @@ function Node({
   group: string;
   depth: number;
   place: string | null;
+  /** `rowWorktree` of the row just above: the parent for a first child, else the sibling before. */
+  above: string | null;
   trail: Trail;
   ctx: Ctx;
 }) {
   const open = !ctx.collapsed.has(node.key);
+  const own = ctx.rowWorktree(node.key);
+  const badge = own === null || own !== above;
   const here = node.kind === "workspace" ? node.key : (ctx.agentWorkspace.get(node.key) ?? place);
   const childContinues = [...trail.continues, !trail.last];
   const target = useMemo(() => ({ group, key: node.key }), [group, node.key]);
@@ -875,9 +905,9 @@ function Node({
       <TrailContext.Provider value={trail}>
         <DragTargetContext.Provider value={target}>
           {node.kind === "workspace" ? (
-            <WorkspaceRow node={node} depth={depth} open={open} ctx={ctx} />
+            <WorkspaceRow node={node} depth={depth} open={open} showBadge={badge} ctx={ctx} />
           ) : (
-            <AgentRow node={node} depth={depth} open={open} away={here !== place ? here : null} ctx={ctx} />
+            <AgentRow node={node} depth={depth} open={open} away={here !== place ? here : null} showBadge={badge} ctx={ctx} />
           )}
         </DragTargetContext.Provider>
       </TrailContext.Provider>
@@ -889,6 +919,7 @@ function Node({
               group={node.key}
               depth={depth + 1}
               place={here}
+              above={i > 0 ? ctx.rowWorktree(node.children[i - 1].key) : own}
               trail={{ continues: childContinues, last: i === node.children.length - 1 }}
               ctx={ctx}
             />
@@ -1212,11 +1243,14 @@ function WorkspaceRow({
   node,
   depth,
   open,
+  showBadge,
   ctx,
 }: {
   node: Extract<TreeNode, { kind: "workspace" }>;
   depth: number;
   open: boolean;
+  /** False when the row above is in the same checkout: the color bar stays, the badge goes. */
+  showBadge: boolean;
   ctx: Ctx;
 }) {
   const reference = ctx.workspaceRefs.get(node.key);
@@ -1371,7 +1405,7 @@ function WorkspaceRow({
               )}
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
-            {worktree && badge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
+            {worktree && badge && showBadge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
             {branch || meta.length > 0 ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 {branch ? (
@@ -1403,6 +1437,7 @@ function AgentRow({
   depth,
   open,
   away,
+  showBadge,
   ctx,
 }: {
   node: Extract<TreeNode, { kind: "agent" }>;
@@ -1410,6 +1445,8 @@ function AgentRow({
   open: boolean;
   /** The agent's workspace when it differs from its parent's; shown under the title. */
   away: string | null;
+  /** False when the row above is in the same checkout: the color bar stays, the badge goes. */
+  showBadge: boolean;
   ctx: Ctx;
 }) {
   const reference = ctx.agentRefs.get(node.key);
@@ -1498,7 +1535,7 @@ function AgentRow({
               )}
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
-            {worktree && badge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
+            {worktree && badge && showBadge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
           </View>
         </>
       )}

@@ -7,6 +7,10 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+### Changed
+
+- A worktree badge shows once per run of sessions in the same checkout: a row whose parent or the sibling just above it works in the same worktree and branch keeps only the color bar. Before, five sub-agents started in one worktree repeated the same badge five times.
+
 ## [0.4.0] - 2026-11-21
 
 ### Changed
