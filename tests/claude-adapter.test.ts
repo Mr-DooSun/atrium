@@ -56,7 +56,7 @@ test("project mutations require the agent directory, including the default local
     const input = { name: "example", scope, transport: "stdio" as const, target: "echo", args: [], env: {}, headers: {} };
     const plan = await claudeAdapter.previewMcpAdd(profile, null, input);
     assert.equal(plan.supported, false);
-    assert.match(plan.warnings[0], /프로젝트/);
+    assert.match(plan.warnings[0], /project scope needs a workspace directory/);
     assert.equal((await claudeAdapter.addMcp(profile, null, input)).error, plan.warnings[0]);
     if (scope) assert.equal((await claudeAdapter.removeMcp(profile, null, input.name, scope)).error, plan.warnings[0]);
     const scoped = await claudeAdapter.previewMcpAdd(profile, "/example", input);
