@@ -75,6 +75,8 @@ $PASEO plugin reload atrium-dev
 $PASEO plugin logs atrium-dev                   # Plugin ready 확인
 ```
 
+- `plugin reload`는 데몬 쪽 코드만 다시 불러온다. 앱은 예전 화면 코드를 그대로 들고 있을 수 있으니, 앱을 새로고침(`Cmd + R`)하거나 설정 → 플러그인에서 Atrium dev를 껐다 켠다.
+
 ### 격리 데몬
 
 `paseo daemon start`에는 `--port` 옵션이 없다(`--home`, `--timeout`만 있다). 포트는 격리 홈의 `config.json`에 미리 써 둔다. 웹 UI(`http://127.0.0.1:<PORT>/`)를 쓰려면 `features.webUi.enabled`를 켠다. Atrium 화면은 설정 → 사이드바 → 보기에서 Atrium을 골라야 보인다.
