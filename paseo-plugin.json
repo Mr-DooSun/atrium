@@ -13,7 +13,8 @@
     "assets/listing-01-agent-tree.jpg",
     "assets/listing-02-panes.jpg",
     "assets/listing-03-plugins.jpg",
-    "assets/listing-04-install-review.jpg"
+    "assets/listing-04-install-review.jpg",
+    "assets/listing-05-usage.jpg"
   ],
   "requirements": {
     "paseo": ">=0.16.1"
