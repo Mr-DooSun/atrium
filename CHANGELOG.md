@@ -7,6 +7,8 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-22
+
 ### Changed
 
 - A worktree badge shows in full once per run of sessions in the same checkout. A row whose parent or the sibling just above it works in the same worktree and branch shows only the badge's icon, in the worktree's color, on its title line. Before, five sub-agents started in one worktree repeated the same badge five times. A row with no badge or icon still means the main checkout on its default branch.
@@ -120,7 +122,8 @@ First public release.
 - The toolbox confirmation shows the full command and no longer repeats warnings.
 - Calls to the Paseo CLI pass `--home` explicitly, and displayed paths are shortened to `~` only inside the home folder.
 
-[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.4.0
 [0.3.2]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.1
