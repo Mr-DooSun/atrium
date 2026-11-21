@@ -19,7 +19,7 @@ import {
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plugin";
 import { MAX_WORKTREE_CWDS, checkoutKey, projectWorktrees, worktreeKey, type WorktreeInfo } from "../shared/project-rpc";
-import { buildTree, workspacesEmptiedBy, type TreeNode } from "../shared/tree";
+import { buildTree, checkoutLanes, workspacesEmptiedBy, type Lane, type TreeNode } from "../shared/tree";
 import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, worktreeBadge, type Palette } from "./look";
 import { ProviderMark, StatusMark, URGENT, WorktreeBadge, WorktreeBar, WorktreeMark, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
 import type { Bucket } from "./look";
@@ -92,11 +92,11 @@ interface Ctx {
   /** The host's name, when more than one host is configured (the sidebar is then split by host); else null. */
   hostLabel(hostId: string): string | null;
   /**
-   * The git checkout a row's session works in (worktree folder and branch), or null when it shows
-   * no badge. A row in the same checkout as the row just above it (its parent or the sibling before
-   * it) leaves the badge to that row and keeps only the color bar.
+   * How a row's checkout (worktree folder and branch) meets the rows drawn right above and below it.
+   * Consecutive rows in one checkout form a run: the badge shows on its first row, the color bar runs
+   * unbroken to its last. Rows with no badge (or not drawn) have no lane.
    */
-  rowWorktree(nodeKey: string): string | null;
+  lane(nodeKey: string): Lane | null;
   /** The drag group a project header moves in: its host's section, or all projects with one host. */
   projectsGroup(projectKey: string): string;
   p: Palette;
@@ -685,11 +685,21 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     });
   }, []);
 
+  const lanes = useMemo(() => {
+    const all = new Map<string, Lane>();
+    for (const block of blocks) {
+      if (collapsed.has(block.projectKey)) continue;
+      for (const [key, lane] of checkoutLanes(block.roots, collapsed, rowWorktree)) all.set(key, lane);
+    }
+    return all;
+  }, [blocks, collapsed, rowWorktree]);
+  const lane = useCallback((nodeKey: string) => lanes.get(nodeKey) ?? null, [lanes]);
+
   const p = useMemo(() => palette(view.theme.colors), [view.theme]);
   const ctx: Ctx = {
     view,
     hostLabel,
-    rowWorktree,
+    lane,
     projectsGroup: projectsGroupOf,
     p,
     compact: view.layout.compact,
@@ -845,7 +855,6 @@ function ProjectBlock({ project, ctx }: { project: { projectKey: string; roots: 
               group={group}
               depth={0}
               place={null}
-              above={i > 0 ? ctx.rowWorktree(project.roots[i - 1].key) : null}
               trail={{ continues: [], last: i === project.roots.length - 1 }}
               ctx={ctx}
             />
@@ -879,7 +888,6 @@ function Node({
   group,
   depth,
   place,
-  above,
   trail,
   ctx,
 }: {
@@ -888,14 +896,11 @@ function Node({
   group: string;
   depth: number;
   place: string | null;
-  /** `rowWorktree` of the row just above: the parent for a first child, else the sibling before. */
-  above: string | null;
   trail: Trail;
   ctx: Ctx;
 }) {
   const open = !ctx.collapsed.has(node.key);
-  const own = ctx.rowWorktree(node.key);
-  const badge = own === null || own !== above;
+  const lane = ctx.lane(node.key);
   const here = node.kind === "workspace" ? node.key : (ctx.agentWorkspace.get(node.key) ?? place);
   const childContinues = [...trail.continues, !trail.last];
   const target = useMemo(() => ({ group, key: node.key }), [group, node.key]);
@@ -905,9 +910,9 @@ function Node({
       <TrailContext.Provider value={trail}>
         <DragTargetContext.Provider value={target}>
           {node.kind === "workspace" ? (
-            <WorkspaceRow node={node} depth={depth} open={open} showBadge={badge} ctx={ctx} />
+            <WorkspaceRow node={node} depth={depth} open={open} lane={lane} ctx={ctx} />
           ) : (
-            <AgentRow node={node} depth={depth} open={open} away={here !== place ? here : null} showBadge={badge} ctx={ctx} />
+            <AgentRow node={node} depth={depth} open={open} away={here !== place ? here : null} lane={lane} ctx={ctx} />
           )}
         </DragTargetContext.Provider>
       </TrailContext.Provider>
@@ -919,7 +924,6 @@ function Node({
               group={node.key}
               depth={depth + 1}
               place={here}
-              above={i > 0 ? ctx.rowWorktree(node.children[i - 1].key) : own}
               trail={{ continues: childContinues, last: i === node.children.length - 1 }}
               ctx={ctx}
             />
@@ -1243,14 +1247,14 @@ function WorkspaceRow({
   node,
   depth,
   open,
-  showBadge,
+  lane,
   ctx,
 }: {
   node: Extract<TreeNode, { kind: "workspace" }>;
   depth: number;
   open: boolean;
-  /** False when the row above is in the same checkout: the badge shrinks to its icon on the title line. */
-  showBadge: boolean;
+  /** Null with no badge. When it joins the row above, the badge shrinks to its icon on the title line. */
+  lane: Lane | null;
   ctx: Ctx;
 }) {
   const reference = ctx.workspaceRefs.get(node.key);
@@ -1341,6 +1345,7 @@ function WorkspaceRow({
   // checkout would all repeat the same branch.
   const worktree = ctx.worktrees.get(worktreeKey(reference.hostId, ws.directory)) ?? null;
   const badge = worktreeBadge(worktree);
+  const showBadge = !lane?.joinAbove;
   // Our badge says it better; Paseo's own branch is the fallback when there is no answer.
   const branch = !worktree && ws.kind === "worktree" ? ws.branch : null;
   const meta: ReactNode[] = [];
@@ -1368,7 +1373,7 @@ function WorkspaceRow({
     >
       {(hovered) => (
         <>
-          {worktree && badge?.tone === "linked" ? <WorktreeBar info={worktree} p={p} /> : null}
+          {worktree && badge?.tone === "linked" ? <WorktreeBar info={worktree} lane={lane} p={p} /> : null}
           <Leading
             node={node}
             mark={
@@ -1438,7 +1443,7 @@ function AgentRow({
   depth,
   open,
   away,
-  showBadge,
+  lane,
   ctx,
 }: {
   node: Extract<TreeNode, { kind: "agent" }>;
@@ -1446,8 +1451,8 @@ function AgentRow({
   open: boolean;
   /** The agent's workspace when it differs from its parent's; shown under the title. */
   away: string | null;
-  /** False when the row above is in the same checkout: the badge shrinks to its icon on the title line. */
-  showBadge: boolean;
+  /** Null with no badge. When it joins the row above, the badge shrinks to its icon on the title line. */
+  lane: Lane | null;
   ctx: Ctx;
 }) {
   const reference = ctx.agentRefs.get(node.key);
@@ -1478,6 +1483,7 @@ function AgentRow({
   const canArchive = !isAgentTurnActive(agent.status) && !hasActiveDescendants;
   const worktree = ctx.worktrees.get(worktreeKey(reference.hostId, agent.cwd)) ?? null;
   const badge = worktreeBadge(worktree);
+  const showBadge = !lane?.joinAbove;
   const modal = target ? (
     <ArchiveModal
       state={archive}
@@ -1509,7 +1515,7 @@ function AgentRow({
     >
       {(hovered) => (
         <>
-          {worktree && badge?.tone === "linked" ? <WorktreeBar info={worktree} p={p} /> : null}
+          {worktree && badge?.tone === "linked" ? <WorktreeBar info={worktree} lane={lane} p={p} /> : null}
           <Leading
             node={node}
             mark={<ProviderMark provider={agent.provider} p={ctx.p} />}

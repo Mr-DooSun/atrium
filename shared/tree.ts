@@ -202,3 +202,44 @@ export function workspacesEmptiedBy(
   }
   return [...candidates].filter((w) => !occupied.has(w));
 }
+
+/** How a row's worktree color bar meets its neighbours on screen; see `checkoutLanes`. */
+export interface Lane {
+  /** The bar runs on into the row above: same checkout there. */
+  readonly joinAbove: boolean;
+  /** The bar runs on into the row below: same checkout there. */
+  readonly joinBelow: boolean;
+}
+
+/**
+ * Walks a project's rows in the order they are drawn (children under their parent, nothing under a
+ * collapsed row) and tells each row how its checkout relates to the rows drawn right above and below
+ * it. Consecutive rows in one checkout form a run: one bar from top to bottom, the badge on its first
+ * row. Runs only follow what is on screen, so a row after a parent's last child continues that child.
+ */
+export function checkoutLanes(
+  roots: readonly TreeNode[],
+  collapsed: ReadonlySet<string>,
+  checkout: (key: string) => string | null,
+): Map<string, Lane> {
+  const order: string[] = [];
+  const walk = (nodes: readonly TreeNode[]) => {
+    for (const node of nodes) {
+      order.push(node.key);
+      if (!collapsed.has(node.key)) walk(node.children);
+    }
+  };
+  walk(roots);
+  const lanes = new Map<string, Lane>();
+  const keys = order.map(checkout);
+  order.forEach((key, i) => {
+    const own = keys[i];
+    const above = i > 0 ? keys[i - 1] : null;
+    const below = i < order.length - 1 ? keys[i + 1] : null;
+    lanes.set(key, {
+      joinAbove: own !== null && own === above,
+      joinBelow: own !== null && own === below,
+    });
+  });
+  return lanes;
+}
