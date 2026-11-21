@@ -243,3 +243,45 @@ export function checkoutLanes(
   });
   return lanes;
 }
+
+/** One branch among a row's nested sessions, and how many of them work on it. */
+export interface BranchCount {
+  readonly key: string;
+  readonly count: number;
+}
+
+/**
+ * For each row, the branches its nested sessions (children, grandchildren, collapsed or not) work
+ * on, most used first (ties keep the order they are drawn in). A row gets an entry only when some
+ * nested session is on a branch other than the row's own, so a parent and children all in one
+ * checkout say nothing: the color bar already shows that. Sessions with no known branch are left out.
+ */
+export function branchesBelow(
+  roots: readonly TreeNode[],
+  branchOf: (key: string) => string | null,
+): Map<string, BranchCount[]> {
+  const result = new Map<string, BranchCount[]>();
+  // Returns the subtree's branches in drawn order, each with its count (the node itself included).
+  const walk = (node: TreeNode): Map<string, number> => {
+    const below = new Map<string, number>();
+    for (const child of node.children) {
+      for (const [key, n] of walk(child)) below.set(key, (below.get(key) ?? 0) + n);
+    }
+    const own = branchOf(node.key);
+    if ([...below.keys()].some((key) => key !== own)) {
+      const order = [...below.keys()];
+      result.set(
+        node.key,
+        [...below]
+          .map(([key, count]) => ({ key, count }))
+          .sort((a, b) => b.count - a.count || order.indexOf(a.key) - order.indexOf(b.key)),
+      );
+    }
+    const all = new Map<string, number>();
+    if (own !== null) all.set(own, 1);
+    for (const [key, n] of below) all.set(key, (all.get(key) ?? 0) + n);
+    return all;
+  };
+  for (const root of roots) walk(root);
+  return result;
+}

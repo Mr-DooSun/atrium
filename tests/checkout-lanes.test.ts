@@ -1,7 +1,7 @@
-// The worktree color bar's runs (checkoutLanes): which rows join the row drawn above or below.
+// The worktree color bar's runs (checkoutLanes) and the nested-branch summary under a parent (branchesBelow).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkoutLanes, type TreeNode } from "../shared/tree.ts";
+import { branchesBelow, checkoutLanes, type TreeNode } from "../shared/tree.ts";
 
 const agent = (key: string, children: TreeNode[] = []): TreeNode => ({ kind: "agent", key, ownsWorkspace: true, children });
 
@@ -54,4 +54,43 @@ test("a collapsed row hides its children, so the next row joins it directly", ()
 test("different checkouts side by side never join", () => {
   const roots = [agent("a"), agent("b"), agent("c")];
   assert.deepEqual(joins(roots, { a: "x", b: "y", c: "y" }), { a: "--", b: "-v", c: "^-" });
+});
+
+// ── branchesBelow: the summary under a parent row ──────────────────────
+
+function summary(roots: TreeNode[], branches: Record<string, string>) {
+  const result = branchesBelow(roots, (key) => branches[key] ?? null);
+  return Object.fromEntries([...result].map(([key, list]) => [key, list.map((b) => `${b.key} ${b.count}`).join(" · ")]));
+}
+
+test("a parent on main with every nested session on one feature branch: one entry, grandchildren counted", () => {
+  const roots = [agent("orch", [agent("auditor", [agent("client")]), agent("tester"), agent("server")])];
+  const all = { orch: "main", auditor: "feat", client: "feat", tester: "feat", server: "feat" };
+  // auditor and client share a checkout, so auditor says nothing.
+  assert.deepEqual(summary(roots, all), { orch: "feat 4" });
+});
+
+test("mixed branches: most used first, ties in drawn order", () => {
+  const roots = [team("")];
+  const all = { orch: "main", auditor: "feat", client: "feat", tester: "main", server: "fix" };
+  assert.deepEqual(summary(roots, all), { orch: "feat 2 · main 1 · fix 1" });
+});
+
+test("a parent and all nested sessions in one checkout: no summary", () => {
+  const roots = [agent("orch", [agent("a"), agent("b")])];
+  assert.deepEqual(summary(roots, { orch: "feat", a: "feat", b: "feat" }), {});
+});
+
+test("sessions with no known branch are left out", () => {
+  const roots = [agent("orch", [agent("a"), agent("b")])];
+  assert.deepEqual(summary(roots, { orch: "main", b: "feat" }), { orch: "feat 1" });
+  assert.deepEqual(summary(roots, { orch: "main" }), {});
+});
+
+test("a nested parent gets its own summary of its subtree", () => {
+  const roots = [agent("orch", [agent("lead", [agent("x"), agent("y")])])];
+  assert.deepEqual(summary(roots, { orch: "main", lead: "main", x: "feat", y: "fix" }), {
+    orch: "main 1 · feat 1 · fix 1",
+    lead: "feat 1 · fix 1",
+  });
 });

@@ -19,8 +19,8 @@ import {
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plugin";
 import { MAX_WORKTREE_CWDS, checkoutKey, projectWorktrees, worktreeKey, type WorktreeInfo } from "../shared/project-rpc";
-import { buildTree, checkoutLanes, workspacesEmptiedBy, type Lane, type TreeNode } from "../shared/tree";
-import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, worktreeBadge, type Palette } from "./look";
+import { branchesBelow, buildTree, checkoutLanes, workspacesEmptiedBy, type Lane, type TreeNode } from "../shared/tree";
+import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, worktreeBadge, worktreeColor, type Palette } from "./look";
 import { ProviderMark, StatusMark, URGENT, WorktreeBadge, WorktreeBar, WorktreeMark, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
 import type { Bucket } from "./look";
 import { ChatSection, useChatDir } from "./chat";
@@ -87,6 +87,14 @@ interface DropMark extends DragTarget {
   readonly edge: "top" | "bottom";
 }
 
+/** A branch among a row's nested sessions, ready to draw. */
+interface BranchBelow {
+  readonly label: string;
+  /** The worktree's folder for a linked worktree (its color); null for the main checkout. */
+  readonly worktreePath: string | null;
+  readonly count: number;
+}
+
 interface Ctx {
   view: PluginSidebarViewProps;
   /** The host's name, when more than one host is configured (the sidebar is then split by host); else null. */
@@ -97,6 +105,12 @@ interface Ctx {
    * unbroken to its last. Rows with no badge (or not drawn) have no lane.
    */
   lane(nodeKey: string): Lane | null;
+  /**
+   * The branches a row's nested sessions work on, most used first, when any differs from the row's
+   * own; null otherwise. Shown under the row so a parent tells its children's branches at a glance
+   * without a level of grouping rows.
+   */
+  branchesBelow(nodeKey: string): readonly BranchBelow[] | null;
   /** The drag group a project header moves in: its host's section, or all projects with one host. */
   projectsGroup(projectKey: string): string;
   p: Palette;
@@ -318,6 +332,24 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     return map;
   }, [agentsByCwd, workspacesByDir, worktrees]);
   const rowWorktree = useCallback((nodeKey: string) => rowWorktrees.get(nodeKey) ?? null, [rowWorktrees]);
+  // Every row's branch, badge or not (the main checkout on its default branch counts too), for the
+  // nested-branch summary. Keyed like the badge's checkout, so one worktree and branch is one entry.
+  const rowBranches = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; worktreePath: string | null }>();
+    const add = (groups: readonly { key: string; items: readonly { key: string; hostId: string }[] }[]) => {
+      for (const group of groups) {
+        for (const ref of group.items) {
+          const info = worktrees.get(worktreeKey(ref.hostId, group.key));
+          if (!info) continue;
+          const label = info.detached ? (info.head ?? "HEAD") : (info.branch ?? info.head ?? "HEAD");
+          map.set(ref.key, { key: checkoutKey(ref.hostId, info), label, worktreePath: info.isMain ? null : info.worktreePath });
+        }
+      }
+    };
+    add(agentsByCwd);
+    add(workspacesByDir);
+    return map;
+  }, [agentsByCwd, workspacesByDir, worktrees]);
   const projectRefs = useMemo(() => new Map(projects.map((r) => [r.key, r])), [projects]);
   // The saved order names projects by host and root folder, which outlive the project's id; the
   // same folder on two hosts is two projects with places of their own.
@@ -694,12 +726,25 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     return all;
   }, [blocks, collapsed, rowWorktree]);
   const lane = useCallback((nodeKey: string) => lanes.get(nodeKey) ?? null, [lanes]);
+  const summaries = useMemo(() => {
+    const byKey = new Map<string, { label: string; worktreePath: string | null }>();
+    for (const b of rowBranches.values()) byKey.set(b.key, b);
+    const all = new Map<string, BranchBelow[]>();
+    for (const block of blocks) {
+      for (const [node, counts] of branchesBelow(block.roots, (key) => rowBranches.get(key)?.key ?? null)) {
+        all.set(node, counts.map(({ key, count }) => ({ ...byKey.get(key)!, count })));
+      }
+    }
+    return all;
+  }, [blocks, rowBranches]);
+  const branchesBelowOf = useCallback((nodeKey: string) => summaries.get(nodeKey) ?? null, [summaries]);
 
   const p = useMemo(() => palette(view.theme.colors), [view.theme]);
   const ctx: Ctx = {
     view,
     hostLabel,
     lane,
+    branchesBelow: branchesBelowOf,
     projectsGroup: projectsGroupOf,
     p,
     compact: view.layout.compact,
@@ -1412,6 +1457,7 @@ function WorkspaceRow({
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
             {worktree && badge && showBadge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
+            <BranchesBelow branches={ctx.branchesBelow(node.key)} ctx={ctx} />
             {branch || meta.length > 0 ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 {branch ? (
@@ -1544,11 +1590,40 @@ function AgentRow({
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
             {worktree && badge && showBadge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
+            <BranchesBelow branches={ctx.branchesBelow(node.key)} ctx={ctx} />
           </View>
         </>
       )}
     </Row>
     </>
+  );
+}
+
+/** Under a parent row: the branches its nested sessions work on, e.g. "feat/x 3 · main 2". */
+function BranchesBelow({ branches, ctx }: { branches: readonly BranchBelow[] | null; ctx: Ctx }) {
+  const { t } = useTranslation(sidebarText);
+  if (!branches || branches.length === 0) return null;
+  const { p } = ctx;
+  const list = branches.map((b) => `${b.label} ${b.count}`).join(", ");
+  return (
+    <View
+      accessible
+      accessibilityLabel={t("branchesBelow", { list })}
+      style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 }}
+    >
+      <View style={{ flexShrink: 0 }}>
+        <Icon name="GitBranch" size={12} color={p.muted} />
+      </View>
+      <Text numberOfLines={1} style={{ flexShrink: 1, minWidth: 0, fontSize: 12, color: p.muted }}>
+        {branches.map((b, i) => (
+          <Text key={`${b.worktreePath ?? ""}|${b.label}`}>
+            {i > 0 ? " · " : ""}
+            <Text style={{ color: b.worktreePath ? worktreeColor(p, b.worktreePath) : p.muted }}>{b.label}</Text>
+            <Text style={{ fontVariant: ["tabular-nums"] }}> {b.count}</Text>
+          </Text>
+        ))}
+      </Text>
+    </View>
   );
 }
 
