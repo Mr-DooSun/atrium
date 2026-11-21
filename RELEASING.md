@@ -42,14 +42,20 @@ git worktree add --detach ../atrium-live origin/main
 ln -s ../atrium/node_modules ../atrium-live/node_modules
 cp ~/.paseo/config.json ~/.paseo/config.json.bak-$(date +%Y%m%d)-atrium-live
 $PASEO plugin remove atrium                     # 마켓플레이스판 제거
+sed -i '' 's/"name": "Atrium"/"name": "Atrium dev"/' ../atrium-live/paseo-plugin.json   # 커밋하지 않는다
 $PASEO plugin install "$(cd ../atrium-live && pwd)"
-$PASEO plugin ls atrium                         # running 확인
+$PASEO plugin ls atrium                         # running, name "Atrium dev" 확인
 ```
+
+`../atrium-live`의 `paseo-plugin.json`은 이름(`name`, `translations.zh-CN.name`)만 `Atrium dev`로 바꿔 두고 커밋하지 않는다. 설정의 플러그인 목록에서 개발판은 `Atrium dev`, 마켓플레이스판은 `Atrium`으로 구분된다. id는 `atrium` 그대로 둔다.
 
 확인할 브랜치로 바꾼 뒤 다시 불러온다.
 
 ```bash
+git -C ../atrium-live fetch origin
+git -C ../atrium-live stash                      # Atrium dev 이름 수정을 잠시 치운다
 git -C ../atrium-live checkout --detach origin/<branch>
+git -C ../atrium-live stash pop                  # 이름 수정을 되돌려 놓는다
 $PASEO plugin reload atrium
 $PASEO plugin logs atrium                       # Plugin ready 확인
 ```
@@ -59,6 +65,7 @@ $PASEO plugin logs atrium                       # Plugin ready 확인
 ```bash
 $PASEO plugin remove atrium
 $PASEO plugin install mr-doosun/atrium
+git -C ../atrium-live checkout -- paseo-plugin.json   # 이름 수정 되돌리기(선택)
 ```
 
 - 사이드바 순서 같은 atrium 데이터는 플러그인 폴더가 아니라 `~/.paseo/atrium/`(예전 경로 `~/.paseo/nested-agents/`)에 있어 바꿔 끼워도 남는다.
