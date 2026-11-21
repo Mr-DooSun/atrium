@@ -7,6 +7,8 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-21
+
 ### Fixed
 
 - With more than one host connected, a folder open on two hosts showed as two project blocks with the same name. Each project header now shows its host's name next to the project name, and the menu and remove dialog name the host too. With a single host nothing changes.
@@ -108,7 +110,8 @@ First public release.
 - The toolbox confirmation shows the full command and no longer repeats warnings.
 - Calls to the Paseo CLI pass `--home` explicitly, and displayed paths are shortened to `~` only inside the home folder.
 
-[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.2.1
