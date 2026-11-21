@@ -50,6 +50,16 @@ const exact = {
   "Installs third-party code from a GitHub repository.": "thirdParty",
   [PASEO_PLUGIN_TRUST_WARNING]: "paseoTrust",
   "agy is not installed (or not on PATH)": "agyMissing",
+  "This plugin source is not a marketplace you added. Install it only if you trust the source.": "untrustedMarketplace",
+  "Claude installs plugins from marketplace sources only.": "claudeMarketplaceOnly",
+  "A marketplace that is not added yet is also added to the user settings.": "marketplaceAutoAdd",
+  "Could not read the login status.": "authUnknown",
+  // Korean text sent by daemons before the Claude adapter switched to English (0.3.1 and older).
+  // Keep for one release, then remove with the Korean entries above and in localizeDiagnostic.
+  "마켓플레이스에 등록되지 않은 출처의 플러그인입니다. 신뢰하는 출처인지 확인하세요.": "untrustedMarketplace",
+  "Claude는 마켓플레이스 출처만 지원합니다.": "claudeMarketplaceOnly",
+  "아직 추가되지 않은 마켓플레이스는 user 설정에 함께 추가됩니다.": "marketplaceAutoAdd",
+  "인증 상태를 읽을 수 없습니다.": "authUnknown",
 } satisfies Record<string, StaticKey>;
 
 type DetailKey = { [K in keyof Diagnostic]: Diagnostic[K] extends `${string}{{detail}}${string}` ? K : never }[keyof Diagnostic];
@@ -66,6 +76,10 @@ const details: readonly (readonly [DetailKey, RegExp])[] = [
   ["invalidResponse", /^(Codex) returned (?:an invalid MCP list|invalid JSON for .+)\.$/],
   ["invalidResponse", /^(Paseo) returned an invalid (?:installed plugin list|update result)\.$/],
   ["invalidResponse", /^(Paseo registry) returned an invalid catalog\.$/],
+  ["invalidResponse", /^(Claude CLI) returned incomplete JSON\. Check the output size limit\.$/],
+  // "project scope ..." is an exact match (projectRequired); other scopes name themselves.
+  ["scopeNeedsWorkspace", /^(local) scope needs a workspace directory$/],
+  ["scopeNeedsWorkspace", /^프로젝트 디렉터리를 선택해야 (local|project) 범위에 설치할 수 있습니다\.$/],
   ["registryHttp", /^Paseo registry returned HTTP (\d+)\.$/],
   ["writeFailed", /^write failed: ([\s\S]+)$/],
   ["badConfig", /^(.+): mcp_config\.json is (?:not a JSON object|not valid JSON:[\s\S]+); not modified$/],
@@ -81,7 +95,10 @@ export function localizeDiagnostic(t: Translate, text: string): string {
   if (Object.hasOwn(exact, text)) return t(`diagnostic.${exact[text as keyof typeof exact]}`);
   const wrongProfile = /^Profile (.+) is not a (claude|codex|antigravity) profile$/.exec(text);
   if (wrongProfile) return t("diagnostic.wrongProfile", { id: wrongProfile[1], ecosystem: wrongProfile[2] });
-  const claudeOAuth = /^(.+) 프로필로 Claude 터미널을 열고 \/mcp에서 (.+) 인증을 완료하세요\. mcp login --no-browser는 리디렉션 URL 입력이 필요합니다\.$/.exec(text);
+  const claudeOAuth =
+    /^Open Claude in a terminal with profile (.+) and authenticate (.+) in \/mcp\. mcp login --no-browser needs the redirect URL entered\.$/.exec(text) ??
+    // Korean form from daemons 0.3.1 and older; remove with the other Korean entries.
+    /^(.+) 프로필로 Claude 터미널을 열고 \/mcp에서 (.+) 인증을 완료하세요\. mcp login --no-browser는 리디렉션 URL 입력이 필요합니다\.$/.exec(text);
   if (claudeOAuth) return t("diagnostic.claudeOAuth", { id: claudeOAuth[1], name: claudeOAuth[2] });
   if (text === "Claude 프로필이 필요합니다.") return t("diagnostic.requiresProfile", { detail: "Claude" });
   if (text === "Claude CLI의 JSON 응답이 불완전합니다. 출력 크기 제한을 확인하세요.") {
