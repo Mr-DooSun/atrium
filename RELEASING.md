@@ -28,58 +28,65 @@ git worktree add -b <type>/<name> ../atrium-<name> origin/main
 
 ## 3. 테스트 환경
 
-- 실사용 Paseo 데몬(`~/.paseo`, 포트 6767)에는 atrium을 하나만 설치한다. 마켓플레이스판과 개발판은 사용량 소스 ID가 같아 함께 실행할 수 없다(`Duplicate usage source`).
-- 개발판을 평소 쓰는 Paseo에서 확인하려면 마켓플레이스판을 빼고 개발판으로 바꿔 끼운다(아래 "실사용 데몬에서 개발판 쓰기").
+- 실사용 Paseo 데몬(`~/.paseo`, 포트 6767)에는 운영판(마켓플레이스)과 개발판을 함께 설치해 두고, **한 번에 하나만 켠다**. 둘은 사용량 소스 ID가 같아 동시에 켜면 나중에 켠 쪽이 `Duplicate usage source`로 실패한다(`failed`). 플러그인 서버 코드는 자기 설치 ID를 알 수 없어 코드로 피할 수 없다.
 - 설치 확인(git 소스 관리 설치)과 여러 host 구성 같은 재현은 격리 데몬과 앱 내장 웹 클라이언트로 한다.
 
-### 실사용 데몬에서 개발판 쓰기
+### 실사용 데몬의 운영판과 개발판
 
-전용 worktree `../atrium-live`를 폴더 소스로 설치한다. 폴더 소스는 그 자리의 코드를 그대로 쓰고 `plugin update` 대상에서 빠진다. 원본 체크아웃(`main`)은 설치하지 않는다.
+| | ID | 설정의 이름 | 소스 |
+|---|---|---|---|
+| 운영판 | `atrium` | Atrium | 마켓플레이스 `mr-doosun/atrium` |
+| 개발판 | `atrium-dev` | Atrium dev | 전용 worktree `../atrium-live` (폴더 소스) |
+
+처음 설정:
 
 ```bash
 PASEO=/Applications/Paseo.app/Contents/Resources/bin/paseo
 git worktree add --detach ../atrium-live origin/main
 ln -s ../atrium/node_modules ../atrium-live/node_modules
-cp ~/.paseo/config.json ~/.paseo/config.json.bak-$(date +%Y%m%d)-atrium-live
-$PASEO plugin remove atrium                     # 마켓플레이스판 제거
 sed -i '' 's/"name": "Atrium"/"name": "Atrium dev"/' ../atrium-live/paseo-plugin.json   # 커밋하지 않는다
-$PASEO plugin install "$(cd ../atrium-live && pwd)"
-$PASEO plugin ls atrium                         # running, name "Atrium dev" 확인
+cp ~/.paseo/config.json ~/.paseo/config.json.bak-$(date +%Y%m%d)-atrium
+$PASEO plugin install mr-doosun/atrium          # 운영판
+$PASEO plugin disable atrium                    # 하나만 켜 둔다
+$PASEO plugin install "$(cd ../atrium-live && pwd)" --id atrium-dev
+$PASEO plugin ls                                # atrium disabled, atrium-dev running
 ```
 
-`../atrium-live`의 `paseo-plugin.json`은 이름(`name`, `translations.zh-CN.name`)만 `Atrium dev`로 바꿔 두고 커밋하지 않는다. 설정의 플러그인 목록에서 개발판은 `Atrium dev`, 마켓플레이스판은 `Atrium`으로 구분된다. id는 `atrium` 그대로 둔다.
+바꿔 쓰기: 설정 → 플러그인에서 켜진 쪽을 먼저 끄고 다른 쪽을 켠다. CLI로는 아래와 같다.
 
-확인할 브랜치로 바꾼 뒤 다시 불러온다.
+```bash
+$PASEO plugin disable atrium-dev && $PASEO plugin enable atrium   # 운영판으로
+$PASEO plugin disable atrium && $PASEO plugin enable atrium-dev   # 개발판으로
+```
+
+- 둘 다 켜서 한쪽이 `failed`가 되면, 그쪽을 끈다.
+- 사이드바 보기 선택은 플러그인 ID별이다(`atrium/atrium`, `atrium-dev/atrium`). 바꾼 뒤 사이드바가 기본 보기로 돌아가면 설정 → 사이드바 → 보기에서 Atrium을 다시 고른다.
+- 사이드바 순서 같은 atrium 데이터(`~/.paseo/atrium/`, 예전 경로 `~/.paseo/nested-agents/`)는 두 판이 함께 쓴다.
+- 운영판 업데이트: `$PASEO plugin update atrium --yes`. 폴더 소스인 개발판은 업데이트 대상이 아니다.
+
+개발판에서 확인할 브랜치로 바꾸기(`Atrium dev` 이름 수정은 stash로 잠시 치웠다가 되돌린다):
 
 ```bash
 git -C ../atrium-live fetch origin
-git -C ../atrium-live stash                      # Atrium dev 이름 수정을 잠시 치운다
+git -C ../atrium-live stash
 git -C ../atrium-live checkout --detach origin/<branch>
-git -C ../atrium-live stash pop                  # 이름 수정을 되돌려 놓는다
-$PASEO plugin reload atrium
-$PASEO plugin logs atrium                       # Plugin ready 확인
+git -C ../atrium-live stash pop
+$PASEO plugin reload atrium-dev
+$PASEO plugin logs atrium-dev                   # Plugin ready 확인
 ```
 
-마켓플레이스판으로 돌아갈 때:
+- `plugin reload`는 데몬 쪽 코드만 다시 불러온다. 앱은 예전 화면 코드를 그대로 들고 있을 수 있으니, 앱을 새로고침(`Cmd + R`)하거나 설정 → 플러그인에서 Atrium dev를 껐다 켠다.
 
-```bash
-$PASEO plugin remove atrium
-$PASEO plugin install mr-doosun/atrium
-git -C ../atrium-live checkout -- paseo-plugin.json   # 이름 수정 되돌리기(선택)
-```
+### 격리 데몬
 
-- 사이드바 순서 같은 atrium 데이터는 플러그인 폴더가 아니라 `~/.paseo/atrium/`(예전 경로 `~/.paseo/nested-agents/`)에 있어 바꿔 끼워도 남는다.
-- 개발판이 깨지면 평소 쓰는 사이드바도 깨진다. 실패하면 `plugin logs`를 확인하고, 급하면 마켓플레이스판으로 돌아간다.
-- 설정의 플러그인 목록에서 폴더 소스는 커밋 대신 폴더 경로로 보인다.
-
-`paseo daemon start`에는 `--port` 옵션이 없다(`--home`, `--timeout`만 있다). 포트는 격리 홈의 `config.json`에 미리 써 둔다.
+`paseo daemon start`에는 `--port` 옵션이 없다(`--home`, `--timeout`만 있다). 포트는 격리 홈의 `config.json`에 미리 써 둔다. 웹 UI(`http://127.0.0.1:<PORT>/`)를 쓰려면 `features.webUi.enabled`를 켠다. Atrium 화면은 설정 → 사이드바 → 보기에서 Atrium을 골라야 보인다.
 
 ```bash
 PASEO=/Applications/Paseo.app/Contents/Resources/bin/paseo
 DIR=/private/tmp/<dir>; PORT=<다른 포트>
 mkdir -p $DIR
 cat > $DIR/config.json <<JSON
-{"version":1,"daemon":{"listen":"127.0.0.1:$PORT","mcp":{"injectIntoAgents":false},"relay":{"enabled":false}},"pluginsEnabled":true}
+{"version":1,"daemon":{"listen":"127.0.0.1:$PORT","mcp":{"injectIntoAgents":false},"relay":{"enabled":false}},"pluginsEnabled":true,"features":{"webUi":{"enabled":true}}}
 JSON
 env -u PASEO_AGENT_ID -u PASEO_HOME $PASEO daemon start --home $DIR
 ```
@@ -87,10 +94,13 @@ env -u PASEO_AGENT_ID -u PASEO_HOME $PASEO daemon start --home $DIR
 git 소스 관리 설치 확인과 정리:
 
 ```bash
-PASEO_HOME=$DIR $PASEO plugin install git:Mr-DooSun/atrium --ref <branch> --id <test-id> --host 127.0.0.1:$PORT </dev/null
+PASEO_HOME=$DIR $PASEO plugin install git:Mr-DooSun/atrium --ref <branch> --host 127.0.0.1:$PORT </dev/null
 PASEO_HOME=$DIR $PASEO plugin ls --host 127.0.0.1:$PORT    # running 확인
 $PASEO daemon stop --home $DIR
 ```
+
+- 같은 데몬에 atrium을 두 번 설치하면 사용량 소스가 겹친다. 다시 설치하기 전에 `plugin remove`로 앞선 설치를 지운다.
+- 여러 host 재현: 격리 데몬 두 개를 띄우고 `$PASEO --host 127.0.0.1:<A> host add 127.0.0.1:<B> --label <이름>`으로 A에 B를 붙인 뒤 A의 웹 UI를 연다.
 
 ## 4. 머지 전 확인
 
@@ -130,7 +140,7 @@ Semantic Versioning을 따른다. 1.0 전에는 버그 수정은 `0.x.y`, 기능
    - Commit: 머지 sha
    - Categories: Sidebar, Workspaces, Orchestration, Utils
    - 변경 요약
-7. 심사가 머지되면 실사용 데몬에서 `paseo plugin update atrium --yes`를 실행한다. 목록 갱신이 늦을 수 있다. 개발판(폴더 소스)을 쓰는 중이면 `../atrium-live`를 태그로 옮겨 `plugin reload`하거나, 3번의 방법으로 마켓플레이스판으로 돌아간다.
+7. 심사가 머지되면 실사용 데몬에서 `paseo plugin update atrium --yes`로 운영판을 올린다. 목록 갱신이 늦을 수 있다.
 
 ## 9. 사용자 승인이 필요한 일
 
