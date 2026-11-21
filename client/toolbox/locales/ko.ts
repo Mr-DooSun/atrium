@@ -379,5 +379,10 @@ export default {
     thirdParty: "GitHub 저장소의 서드파티 코드를 설치합니다.",
     paseoTrust: "Paseo 플러그인은 샌드박스 없이 데몬 사용자의 권한으로 이 컴퓨터에서 실행됩니다.",
     agyMissing: "agy를 설치하거나 PATH에 추가하세요.",
+    untrustedMarketplace: "추가하지 않은 마켓플레이스의 플러그인입니다. 출처를 믿을 수 있을 때만 설치하세요.",
+    claudeMarketplaceOnly: "Claude는 마켓플레이스 출처에서만 플러그인을 설치합니다.",
+    marketplaceAutoAdd: "마켓플레이스가 아직 추가되지 않았다면 사용자 설정에도 함께 추가됩니다.",
+    authUnknown: "로그인 상태를 확인하지 못했습니다.",
+    scopeNeedsWorkspace: "{{detail}} 범위에 설치하려면 프로젝트 디렉터리를 선택하세요.",
   },
 } satisfies ToolboxResource;

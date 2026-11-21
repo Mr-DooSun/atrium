@@ -379,5 +379,10 @@ export default {
     thirdParty: "Installe du code tiers depuis un dépôt GitHub.",
     paseoTrust: "Les extensions Paseo s’exécutent sans bac à sable avec les droits de l’utilisateur du daemon.",
     agyMissing: "Installez agy ou ajoutez-le au PATH.",
+    untrustedMarketplace: "Cette extension provient d’une place de marché que vous n’avez pas ajoutée. Ne l’installez que si vous faites confiance à la source.",
+    claudeMarketplaceOnly: "Claude installe les extensions uniquement à partir de sources de places de marché.",
+    marketplaceAutoAdd: "Si la place de marché n’a pas encore été ajoutée, elle l’est aussi dans les paramètres utilisateur.",
+    authUnknown: "Impossible de lire l’état de connexion.",
+    scopeNeedsWorkspace: "Choisissez un dossier de projet pour installer avec la portée {{detail}}.",
   },
 } satisfies ToolboxResource;

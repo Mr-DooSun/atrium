@@ -379,5 +379,10 @@ export default {
     thirdParty: "Instala código de terceros desde un repositorio de GitHub.",
     paseoTrust: "Los complementos de Paseo se ejecutan sin aislamiento y con los permisos del usuario del demonio.",
     agyMissing: "Instala agy o añádelo a PATH.",
+    untrustedMarketplace: "Este complemento procede de un mercado que no has añadido. Instálalo solo si confías en el origen.",
+    claudeMarketplaceOnly: "Claude solo instala complementos desde orígenes de mercado.",
+    marketplaceAutoAdd: "Si el mercado aún no está añadido, también se añade a la configuración de usuario.",
+    authUnknown: "No se pudo leer el estado de la sesión.",
+    scopeNeedsWorkspace: "Selecciona una carpeta de proyecto para instalar en el ámbito {{detail}}.",
   },
 } satisfies ToolboxResource;

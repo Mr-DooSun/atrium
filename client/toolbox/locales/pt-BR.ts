@@ -379,5 +379,10 @@ export default {
     thirdParty: "Instala código de terceiros de um repositório GitHub.",
     paseoTrust: "Plugins do Paseo são executados sem sandbox e com acesso de usuário do daemon.",
     agyMissing: "Instale o agy ou inclua-o no PATH.",
+    untrustedMarketplace: "Este plugin vem de um marketplace que você não adicionou. Instale somente se confiar na origem.",
+    claudeMarketplaceOnly: "O Claude instala plugins apenas de origens de marketplace.",
+    marketplaceAutoAdd: "Se o marketplace ainda não foi adicionado, ele também é adicionado às configurações do usuário.",
+    authUnknown: "Não foi possível ler o status de login.",
+    scopeNeedsWorkspace: "Selecione uma pasta do projeto para instalar no escopo {{detail}}.",
   },
 } satisfies ToolboxResource;
