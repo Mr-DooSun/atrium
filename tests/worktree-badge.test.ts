@@ -2,7 +2,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { isDark, palette, worktreeBadge, worktreeColor, type Palette } from "../client/look.ts";
-import type { WorktreeInfo } from "../shared/project-rpc.ts";
+import { checkoutKey, type WorktreeInfo } from "../shared/project-rpc.ts";
 
 type GitInfo = Extract<WorktreeInfo, { kind: "git" }>;
 
@@ -235,4 +235,14 @@ describe("isDark", () => {
       assert.equal(isDark(bad), true, JSON.stringify(bad));
     }
   });
+});
+
+test("checkoutKey: same host, folder and branch share a badge; any difference splits it", () => {
+  const wt = info({ worktreePath: "/wt/feat", isMain: false, branch: "feat/x" });
+  assert.equal(checkoutKey("h1", wt), checkoutKey("h1", { ...wt }));
+  assert.notEqual(checkoutKey("h1", wt), checkoutKey("h2", wt));
+  assert.notEqual(checkoutKey("h1", wt), checkoutKey("h1", { ...wt, worktreePath: "/wt/other" }));
+  assert.notEqual(checkoutKey("h1", wt), checkoutKey("h1", { ...wt, branch: "feat/y" }));
+  const detached = { ...wt, detached: true, branch: null, head: "abc1234" };
+  assert.notEqual(checkoutKey("h1", detached), checkoutKey("h1", { ...detached, head: "def5678" }));
 });
