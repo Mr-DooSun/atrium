@@ -7,6 +7,11 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+### Fixed
+
+- With more than one host connected, a folder open on two hosts showed as two project blocks with the same name. Each project header now shows its host's name next to the project name, and the menu and remove dialog name the host too. With a single host nothing changes.
+- Two hosts' projects in the same folder shared one place in the hand-set order and moved together. The order now keeps each host's project separately. An order saved before this update still applies to every host's project in that folder until you reorder.
+
 ## [0.3.1] - 2026-11-21
 
 Listing and documentation update. The plugin's behavior is unchanged.
