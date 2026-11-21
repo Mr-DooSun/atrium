@@ -68,7 +68,7 @@ describe("plugin scopes", () => {
 describe("direct marketplace install", () => {
   test("rejects non-marketplace kinds, bad plugin names and bad marketplace sources", async () => {
     for (const [source, reason] of [
-      [{ kind: "git", value: "example/kit" }, /마켓플레이스/],
+      [{ kind: "git", value: "example/kit" }, /^Claude installs plugins from marketplace sources only\.$/],
       [{ kind: "marketplace", value: "example/market", plugin: null }, /Plugin name is empty/],
       [{ kind: "marketplace", value: "example/market", plugin: "-rf" }, /must not start with "-"/],
       [{ kind: "marketplace", value: "example/market", plugin: "../x" }, /Plugin name is invalid/],

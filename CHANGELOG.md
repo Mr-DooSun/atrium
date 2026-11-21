@@ -7,6 +7,15 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+### Added
+
+- A listing image of the usage cards for additional accounts (`assets/listing-05-usage.jpg`), made from sample data.
+
+### Fixed
+
+- Claude Code messages in the toolbox (missing profile, timeouts, scope and marketplace warnings, sign-in status and MCP sign-in steps) were always shown in Korean. The Claude adapter now sends English like the other adapters, and the app shows them in its own language.
+- The Simplified Chinese toolbox used two words for "agent". It now uses one.
+
 ## [0.3.1] - 2026-11-21
 
 Listing and documentation update. The plugin's behavior is unchanged.
