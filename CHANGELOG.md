@@ -7,6 +7,8 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-21
+
 ### Changed
 
 - With more than one host connected, the Atrium sidebar is split into a section per host, each headed by the host's name, so every project and session sits under the host it runs on. Projects move and drag within their host's section. The host name beside each project header, added in 0.3.2, is replaced by the section headers. With a single host nothing changes.
@@ -114,7 +116,8 @@ First public release.
 - The toolbox confirmation shows the full command and no longer repeats warnings.
 - Calls to the Paseo CLI pass `--home` explicitly, and displayed paths are shortened to `~` only inside the home folder.
 
-[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.4.0
 [0.3.2]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.0
