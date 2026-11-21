@@ -377,6 +377,11 @@ const en = {
     thirdParty: "Installs third-party code from a GitHub repository.",
     paseoTrust: "Paseo plugins run on this machine without a sandbox, with the daemon user’s access.",
     agyMissing: "Install agy or add it to PATH.",
+    untrustedMarketplace: "This plugin comes from a marketplace you have not added. Install it only if you trust the source.",
+    claudeMarketplaceOnly: "Claude installs plugins from marketplace sources only.",
+    marketplaceAutoAdd: "If the marketplace is not added yet, it is added to the user settings too.",
+    authUnknown: "Could not read the sign-in status.",
+    scopeNeedsWorkspace: "Select a project directory to install in the {{detail}} scope.",
   },
 } as const;
 
