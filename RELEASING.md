@@ -28,8 +28,42 @@ git worktree add -b <type>/<name> ../atrium-<name> origin/main
 
 ## 3. 테스트 환경
 
-- 실사용 Paseo 데몬(`~/.paseo`, 포트 6767)에 개발판을 설치하거나 플러그인을 켜고 끄지 않는다. 마켓플레이스판과 사용량 소스 ID가 같아 동시에 실행할 수 없다.
-- UI와 설치 확인은 격리 데몬과 앱 내장 웹 클라이언트로 한다.
+- 실사용 Paseo 데몬(`~/.paseo`, 포트 6767)에는 atrium을 하나만 설치한다. 마켓플레이스판과 개발판은 사용량 소스 ID가 같아 함께 실행할 수 없다(`Duplicate usage source`).
+- 개발판을 평소 쓰는 Paseo에서 확인하려면 마켓플레이스판을 빼고 개발판으로 바꿔 끼운다(아래 "실사용 데몬에서 개발판 쓰기").
+- 설치 확인(git 소스 관리 설치)과 여러 host 구성 같은 재현은 격리 데몬과 앱 내장 웹 클라이언트로 한다.
+
+### 실사용 데몬에서 개발판 쓰기
+
+전용 worktree `../atrium-live`를 폴더 소스로 설치한다. 폴더 소스는 그 자리의 코드를 그대로 쓰고 `plugin update` 대상에서 빠진다. 원본 체크아웃(`main`)은 설치하지 않는다.
+
+```bash
+PASEO=/Applications/Paseo.app/Contents/Resources/bin/paseo
+git worktree add --detach ../atrium-live origin/main
+ln -s ../atrium/node_modules ../atrium-live/node_modules
+cp ~/.paseo/config.json ~/.paseo/config.json.bak-$(date +%Y%m%d)-atrium-live
+$PASEO plugin remove atrium                     # 마켓플레이스판 제거
+$PASEO plugin install "$(cd ../atrium-live && pwd)"
+$PASEO plugin ls atrium                         # running 확인
+```
+
+확인할 브랜치로 바꾼 뒤 다시 불러온다.
+
+```bash
+git -C ../atrium-live checkout --detach origin/<branch>
+$PASEO plugin reload atrium
+$PASEO plugin logs atrium                       # Plugin ready 확인
+```
+
+마켓플레이스판으로 돌아갈 때:
+
+```bash
+$PASEO plugin remove atrium
+$PASEO plugin install mr-doosun/atrium
+```
+
+- 사이드바 순서 같은 atrium 데이터는 플러그인 폴더가 아니라 `~/.paseo/atrium/`(예전 경로 `~/.paseo/nested-agents/`)에 있어 바꿔 끼워도 남는다.
+- 개발판이 깨지면 평소 쓰는 사이드바도 깨진다. 실패하면 `plugin logs`를 확인하고, 급하면 마켓플레이스판으로 돌아간다.
+- 설정의 플러그인 목록에서 폴더 소스는 커밋 대신 폴더 경로로 보인다.
 
 `paseo daemon start`에는 `--port` 옵션이 없다(`--home`, `--timeout`만 있다). 포트는 격리 홈의 `config.json`에 미리 써 둔다.
 
@@ -89,7 +123,7 @@ Semantic Versioning을 따른다. 1.0 전에는 버그 수정은 `0.x.y`, 기능
    - Commit: 머지 sha
    - Categories: Sidebar, Workspaces, Orchestration, Utils
    - 변경 요약
-7. 심사가 머지되면 실사용 데몬에서 `paseo plugin update atrium --yes`를 실행한다. 목록 갱신이 늦을 수 있다.
+7. 심사가 머지되면 실사용 데몬에서 `paseo plugin update atrium --yes`를 실행한다. 목록 갱신이 늦을 수 있다. 개발판(폴더 소스)을 쓰는 중이면 `../atrium-live`를 태그로 옮겨 `plugin reload`하거나, 3번의 방법으로 마켓플레이스판으로 돌아간다.
 
 ## 9. 사용자 승인이 필요한 일
 
