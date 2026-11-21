@@ -9,6 +9,7 @@ import {
   orderTree,
   placeAt,
   projectOrderKey,
+  sectionByHost,
   upgradeOrder,
 } from "../shared/project-order.ts";
 import type { TreeNode } from "../shared/tree.ts";
@@ -148,4 +149,16 @@ test("a project's rows fall back to the order saved under its folder alone", () 
   assert.deepEqual(nodesFor(legacy, group, "project:/b")[group], ["x", "y"]);
   const both = { ...legacy, [group]: ["y"] };
   assert.equal(nodesFor(both, group, "project:/b"), both);
+});
+
+test("sectionByHost puts each host's projects together, in host order, keeping their order", () => {
+  const items = [
+    { k: "b1", h: "B" },
+    { k: "a1", h: "A" },
+    { k: "x1", h: "gone" },
+    { k: "b2", h: "B" },
+    { k: "a2", h: "A" },
+  ];
+  const keys = sectionByHost(items, (i) => i.h, ["A", "B"]).map((i) => i.k);
+  assert.deepEqual(keys, ["a1", "a2", "b1", "b2", "x1"]);
 });

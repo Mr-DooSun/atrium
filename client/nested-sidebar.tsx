@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PanResponder, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -51,6 +51,7 @@ import {
   placeAt,
   projectOrderKey,
   rootsGroup,
+  sectionByHost,
   upgradeOrder,
   type BlockLayout,
 } from "../shared/project-order";
@@ -69,6 +70,9 @@ const TrailContext = createContext<Trail>({ continues: [], last: true });
 
 /** The group projects are dragged in; sessions are dragged among their parent's children. */
 const PROJECTS = "__projects__";
+/** The drag group of the projects in one host's section; all projects share one with a single host. */
+const projectsGroup = (hostId: string | null) => (hostId === null ? PROJECTS : `${PROJECTS}\u0000${hostId}`);
+const isProjectsGroup = (group: string) => group === PROJECTS || group.startsWith(`${PROJECTS}\u0000`);
 interface DragTarget {
   readonly group: string;
   readonly key: string;
@@ -85,8 +89,10 @@ interface DropMark extends DragTarget {
 
 interface Ctx {
   view: PluginSidebarViewProps;
-  /** The host's name to show beside a project's, when more than one host is configured; else null. */
+  /** The host's name, when more than one host is configured (the sidebar is then split by host); else null. */
   hostLabel(hostId: string): string | null;
+  /** The drag group a project header moves in: its host's section, or all projects with one host. */
+  projectsGroup(projectKey: string): string;
   p: Palette;
   compact: boolean;
   workspaceRefs: ReadonlyMap<string, WorkspaceRef>;
@@ -104,7 +110,8 @@ interface Ctx {
   startReorder(): void;
   /** Moves a project one place up (-1) or down (+1). */
   moveProject(key: string, delta: -1 | 1): void;
-  projectIndex: ReadonlyMap<string, number>;
+  /** Each project's place among the projects it can move between (its host's section). */
+  projectIndex: ReadonlyMap<string, { index: number; last: number }>;
   /** The item being dragged on desktop and how far it moved; null when none is. */
   drag: Drag | null;
   dropMark: DropMark | null;
@@ -314,6 +321,19 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     [order.nodes, rootGroup, projectRoot],
   );
 
+  // With one host every project is on it, so it goes unsaid. With more, the list is split into a
+  // section per host, in the app's host order, so every session sits under its host's name.
+  const hosts = useHosts();
+  const hostSections = hosts.length > 1;
+  const hostLabel = useCallback(
+    (hostId: string) => (hostSections ? (hosts.find((h) => h.serverId === hostId)?.label || hostId) : null),
+    [hosts, hostSections],
+  );
+  const hostOf = useCallback(
+    (projectKey: string) => (hostSections ? (projectRefs.get(projectKey)?.hostId ?? null) : null),
+    [hostSections, projectRefs],
+  );
+
   // Projects with sessions in tree order (most recent work first), then empty ones by name.
   const blocks = useMemo(() => {
     const all: { projectKey: string; roots: readonly TreeNode[] }[] = [...tree];
@@ -322,21 +342,37 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     const shown = all.filter((b) => projectRefs.has(b.projectKey));
     // A hand-set order, when there is one, wins over recent work, for projects and the sessions
     // under them at every depth.
-    return applyOrder(shown, savedOrder, (b) => rootOf(b.projectKey)).map((b) => ({
+    const ordered = applyOrder(shown, savedOrder, (b) => rootOf(b.projectKey)).map((b) => ({
       ...b,
       roots: orderTree(b.roots, rootGroup(b.projectKey), nodeOrders(b.projectKey)),
     }));
-  }, [tree, projects, projectRefs, savedOrder, rootOf, rootGroup, nodeOrders]);
+    if (!hostSections) return ordered;
+    // Hosts in the app's order, a host it no longer lists last; projects keep their order inside.
+    return sectionByHost(ordered, (b) => hostOf(b.projectKey), hosts.map((h) => h.serverId));
+  }, [tree, projects, projectRefs, savedOrder, rootOf, rootGroup, nodeOrders, hostSections, hosts, hostOf]);
 
   const [reordering, setReordering] = useState(false);
-  const projectIndex = useMemo(() => new Map(blocks.map((b, i) => [b.projectKey, i])), [blocks]);
+  // A project moves among its own host's projects: a place in another host's section would not show.
+  const sectionOf = useCallback(
+    (key: string) => blocks.filter((b) => hostOf(b.projectKey) === hostOf(key)),
+    [blocks, hostOf],
+  );
+  const projectIndex = useMemo(() => {
+    const map = new Map<string, { index: number; last: number }>();
+    for (const b of blocks) {
+      const section = sectionOf(b.projectKey);
+      map.set(b.projectKey, { index: section.indexOf(b), last: section.length - 1 });
+    }
+    return map;
+  }, [blocks, sectionOf]);
   const moveProject = useCallback(
     (key: string, delta: -1 | 1) => {
-      const shown = blocks.map((b) => rootOf(b.projectKey));
+      const shown = sectionOf(key).map((b) => rootOf(b.projectKey));
       order.save(move(shown, savedOrder, rootOf(key), delta));
     },
-    [blocks, order, savedOrder, rootOf],
+    [sectionOf, order, savedOrder, rootOf],
   );
+  const projectsGroupOf = useCallback((projectKey: string) => projectsGroup(hostOf(projectKey)), [hostOf]);
 
   // Desktop drag. The pressed item's siblings are measured when the press begins, on the page, so
   // the measures are fresh (react-native-web reports layout only when a size changes, not when a
@@ -491,7 +527,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
       const land = landing(target, dy);
       if (!land) return;
       const shown = land.all.map((b) => b.key);
-      if (target.group === PROJECTS) {
+      if (isProjectsGroup(target.group)) {
         order.save(placeAt(shown.map(rootOf), savedOrder, rootOf(target.key), land.at));
       } else {
         // Only the children shown now: archived sessions do not come back, so they need no place.
@@ -532,7 +568,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   /** One step of the gesture: a reorder move, or a pane drag once the pointer leaves the sidebar. */
   const step = (target: DragTarget) => {
     const { dragMove, dragEnd, endPane } = latestDrag.current;
-    const payload = target.group === PROJECTS ? undefined : payloads.current.get(target.key);
+    const payload = isProjectsGroup(target.group) ? undefined : payloads.current.get(target.key);
     if (payload) {
       const toward = isPaneDrag({
         x: lastX.current,
@@ -580,7 +616,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
           if (compactRef.current || target === null) return false;
           if (Math.abs(g.dy) > 6 && Math.abs(g.dy) > Math.abs(g.dx)) return true;
           // A sideways start on a session can only be a pull toward the panes.
-          return target.group !== PROJECTS && Math.abs(g.dx) > 6;
+          return !isProjectsGroup(target.group) && Math.abs(g.dx) > 6;
         },
         onPanResponderGrant: (e) => {
           lastY.current = e.nativeEvent.pageY;
@@ -627,16 +663,10 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   }, []);
 
   const p = useMemo(() => palette(view.theme.colors), [view.theme]);
-  // With one host every project is on it, so it goes unsaid; with more, the same folder can be a
-  // project on each of them, and only the host tells the blocks apart.
-  const hosts = useHosts();
-  const hostLabel = useCallback(
-    (hostId: string) => (hosts.length > 1 ? (hosts.find((h) => h.serverId === hostId)?.label || hostId) : null),
-    [hosts],
-  );
   const ctx: Ctx = {
     view,
     hostLabel,
+    projectsGroup: projectsGroupOf,
     p,
     compact: view.layout.compact,
     workspaceRefs,
@@ -692,12 +722,47 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
           onDone={() => setReordering(false)}
         />
       ) : null}
-      {blocks.map((project) => (
-        <ProjectBlock key={project.projectKey} project={project} ctx={ctx} />
-      ))}
+      {blocks.map((project, i) => {
+        const host = hostOf(project.projectKey);
+        const first = host !== null && (i === 0 || hostOf(blocks[i - 1].projectKey) !== host);
+        return (
+          <Fragment key={project.projectKey}>
+            {first ? <HostHeader hostId={host} first={i === 0} ctx={ctx} /> : null}
+            <ProjectBlock project={project} ctx={ctx} />
+          </Fragment>
+        );
+      })}
     </ScrollView>
     </View>
     <ChatSection view={view} p={p} chatDir={chatDir} />
+    </View>
+  );
+}
+
+/** The head of one host's section, shown when more than one host is configured. */
+function HostHeader({ hostId, first, ctx }: { hostId: string; first: boolean; ctx: Ctx }) {
+  const status = useHosts().find((h) => h.serverId === hostId)?.status;
+  const label = ctx.hostLabel(hostId) ?? hostId;
+  const { p } = ctx;
+  return (
+    <View
+      accessibilityRole="header"
+      accessibilityLabel={label}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingLeft: 8,
+        paddingRight: 8,
+        marginTop: first ? 6 : PROJECT.blockGap,
+        marginBottom: 4,
+        opacity: status === "online" ? 1 : 0.6,
+      }}
+    >
+      <Icon name="Server" size={12} color={p.muted} />
+      <Text numberOfLines={1} selectable={false} style={{ flex: 1, color: p.muted, fontSize: 11, fontWeight: "600", letterSpacing: 0.4 }}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -709,7 +774,8 @@ function ProjectBlock({ project, ctx }: { project: { projectKey: string; roots: 
   const open = !ctx.reordering && !ctx.collapsed.has(project.projectKey);
   const { p } = ctx;
   const empty = project.roots.length === 0;
-  const target = useMemo(() => ({ group: PROJECTS, key: project.projectKey }), [project.projectKey]);
+  const projectsGroup = ctx.projectsGroup(project.projectKey);
+  const target = useMemo(() => ({ group: projectsGroup, key: project.projectKey }), [projectsGroup, project.projectKey]);
   const group = ctx.rootGroup(project.projectKey);
   const hasPendingPermission = !open && project.roots.some((node) => {
     const keys = descendantAgents(node);
@@ -1485,8 +1551,7 @@ function ProjectRow({
   const [hovered, setHovered] = useState(false);
   const remove = useRemoveProject(reference);
   const [menu, setMenu] = useState(false);
-  const index = ctx.projectIndex.get(reference.key) ?? 0;
-  const last = ctx.projectIndex.size - 1;
+  const { index, last } = ctx.projectIndex.get(reference.key) ?? { index: 0, last: 0 };
   const dragTarget = useContext(DragTargetContext);
   const dragSource = useDragSource(dragTarget, ctx);
   // Folded, the header stands in for its rows: it shows the most urgent state among them.
@@ -1542,7 +1607,6 @@ function ProjectRow({
         {/* Not selectable, so dragging the header never selects its name. */}
         <Text numberOfLines={1} selectable={false} style={{ flex: 1, color: p.muted, fontSize: 14 }}>
           {displayName}
-          {host ? <Text style={{ fontSize: 12, opacity: 0.7 }}>{`  ${host}`}</Text> : null}
         </Text>
       </Pressable>
       {ctx.reordering ? (

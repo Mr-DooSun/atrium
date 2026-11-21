@@ -168,3 +168,16 @@ export function orderTree(roots: readonly TreeNode[], group: string, nodes: Node
     );
   return sort(roots, group, "first");
 }
+
+/**
+ * Items split into one run per host, hosts in `hostOrder` (hosts it does not list last), each
+ * run keeping the items' own order. Used to show a section per host when there is more than one.
+ */
+export function sectionByHost<T>(items: readonly T[], hostOf: (item: T) => string | null, hostOrder: readonly string[]): T[] {
+  const rank = new Map(hostOrder.map((h, i) => [h, i]));
+  const rankOf = (item: T) => rank.get(hostOf(item) ?? "") ?? hostOrder.length;
+  return items
+    .map((item, i) => ({ item, i }))
+    .sort((x, y) => rankOf(x.item) - rankOf(y.item) || x.i - y.i)
+    .map(({ item }) => item);
+}
