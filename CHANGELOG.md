@@ -7,6 +7,10 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+### Changed
+
+- With more than one host connected, the Atrium sidebar is split into a section per host, each headed by the host's name, so every project and session sits under the host it runs on. Projects move and drag within their host's section. The host name beside each project header, added in 0.3.2, is replaced by the section headers. With a single host nothing changes.
+
 ## [0.3.2] - 2026-11-21
 
 ### Fixed
