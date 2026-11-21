@@ -379,5 +379,10 @@ export default {
     thirdParty: "يثبّت تعليمات برمجية من جهة خارجية من مستودع GitHub.",
     paseoTrust: "تعمل إضافات Paseo على هذا الجهاز دون عزل وبصلاحيات مستخدم الخدمة.",
     agyMissing: "ثبّت agy أو أضفه إلى PATH.",
+    untrustedMarketplace: "تأتي هذه الإضافة من سوق لم تضفه. ثبّتها فقط إذا كنت تثق بالمصدر.",
+    claudeMarketplaceOnly: "يثبّت ‎Claude‎ الإضافات من مصادر الأسواق فقط.",
+    marketplaceAutoAdd: "إذا لم يكن السوق مضافًا بعد، فتتم إضافته إلى إعدادات المستخدم أيضًا.",
+    authUnknown: "تعذّرت قراءة حالة تسجيل الدخول.",
+    scopeNeedsWorkspace: "لتثبيت الإضافة في النطاق ‎{{detail}}‎، اختر مجلد مشروع.",
   },
 } satisfies ToolboxResource;

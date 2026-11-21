@@ -379,5 +379,10 @@ export default {
     thirdParty: "GitHub リポジトリのサードパーティコードをインストールします。",
     paseoTrust: "Paseo プラグインはこのコンピューターでデーモンユーザーの権限を使い、サンドボックスなしで実行されます。",
     agyMissing: "agy をインストールするか PATH に追加してください。",
+    untrustedMarketplace: "このプラグインは、追加していないマーケットプレイスのものです。ソースを信頼できる場合のみインストールしてください。",
+    claudeMarketplaceOnly: "Claude はマーケットプレイスのソースからのみプラグインをインストールします。",
+    marketplaceAutoAdd: "マーケットプレイスがまだ追加されていない場合は、ユーザー設定にも追加されます。",
+    authUnknown: "ログイン状態を読み取れませんでした。",
+    scopeNeedsWorkspace: "{{detail}} 範囲にインストールするには、プロジェクトディレクトリを選んでください。",
   },
 } satisfies ToolboxResource;
