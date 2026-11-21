@@ -172,6 +172,28 @@ export function WorktreeBadge({ info, spec, p }: { info: GitWorktree; spec: Work
   );
 }
 
+/**
+ * The badge cut to its icon, on the title line (after the title) of a row whose row above shows the full badge for the
+ * same checkout. "No badge" keeps meaning the default branch of the main checkout; this mark says
+ * "same as above". Screen readers get the full badge text.
+ */
+export function WorktreeMark({ info, spec, p }: { info: GitWorktree; spec: WorktreeBadgeSpec; p: Palette }) {
+  const { t } = useTranslation(sidebarText);
+  const linked = spec.tone === "linked";
+  const color = linked ? worktreeColor(p, info.worktreePath) : p.muted;
+  const branch = spec.detached ? t("worktreeDetached", { head: spec.label }) : spec.label;
+  const label = spec.folder ? t("worktreeLinked", { folder: spec.folder, branch }) : t("worktreeMain", { branch });
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${label}. ${t("worktreePath", { path: info.worktreePath })}`}
+      style={{ height: TITLE_LINE, justifyContent: "center", flexShrink: 0 }}
+    >
+      <Icon name={linked ? "FolderGit2" : "GitBranch"} size={12} color={color} />
+    </View>
+  );
+}
+
 /** A thin bar on a row's left edge, in its worktree's color, so sessions of one worktree line up. */
 export function WorktreeBar({ info, p }: { info: GitWorktree; p: Palette }) {
   return (

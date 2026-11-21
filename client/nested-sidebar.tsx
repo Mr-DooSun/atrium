@@ -21,7 +21,7 @@ import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plu
 import { MAX_WORKTREE_CWDS, checkoutKey, projectWorktrees, worktreeKey, type WorktreeInfo } from "../shared/project-rpc";
 import { buildTree, workspacesEmptiedBy, type TreeNode } from "../shared/tree";
 import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, worktreeBadge, type Palette } from "./look";
-import { ProviderMark, StatusMark, URGENT, WorktreeBadge, WorktreeBar, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
+import { ProviderMark, StatusMark, URGENT, WorktreeBadge, WorktreeBar, WorktreeMark, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
 import type { Bucket } from "./look";
 import { ChatSection, useChatDir } from "./chat";
 import {
@@ -1249,7 +1249,7 @@ function WorkspaceRow({
   node: Extract<TreeNode, { kind: "workspace" }>;
   depth: number;
   open: boolean;
-  /** False when the row above is in the same checkout: the color bar stays, the badge goes. */
+  /** False when the row above is in the same checkout: the badge shrinks to its icon on the title line. */
   showBadge: boolean;
   ctx: Ctx;
 }) {
@@ -1387,6 +1387,7 @@ function WorkspaceRow({
               <Text numberOfLines={1} style={titleStyle(ctx, hovered || active)}>
                 {ws.label}
               </Text>
+              {worktree && badge && !showBadge ? <WorktreeMark info={worktree} spec={badge} p={p} /> : null}
               {ws.additions !== null && ws.deletions !== null ? (
                 <Text style={{ fontSize: 12, lineHeight: TITLE_LINE, fontVariant: ["tabular-nums"] }}>
                   <Text style={{ color: p.success }}>+{ws.additions}</Text>
@@ -1445,7 +1446,7 @@ function AgentRow({
   open: boolean;
   /** The agent's workspace when it differs from its parent's; shown under the title. */
   away: string | null;
-  /** False when the row above is in the same checkout: the color bar stays, the badge goes. */
+  /** False when the row above is in the same checkout: the badge shrinks to its icon on the title line. */
   showBadge: boolean;
   ctx: Ctx;
 }) {
@@ -1521,6 +1522,7 @@ function AgentRow({
               <Text numberOfLines={1} style={titleStyle(ctx, hovered || active)}>
                 {agent.label}
               </Text>
+              {worktree && badge && !showBadge ? <WorktreeMark info={worktree} spec={badge} p={p} /> : null}
               {away && node.ownsWorkspace ? <DiffStat workspaceKey={away} ctx={ctx} /> : null}
               <Text numberOfLines={1} style={{ color: p.muted, fontSize: 12, lineHeight: TITLE_LINE }}>
                 {hidden > 0 ? t("collapsedBelow", { n: hidden }) : ""}
