@@ -32,7 +32,7 @@ export interface PaneProps {
   gap: number;
   p: Palette;
   link: PaneLink;
-  /** Set when the agent lives on another host than the plugin's: its timeline can't load here. */
+  /** The agent's host id when it is another host than the plugin's: its timeline can't load here. */
   otherHost?: string | null;
   /** The agent has a permission request open (the sidebar's source, not the snapshot alone). */
   waitingPermission?: boolean;
@@ -67,6 +67,18 @@ export interface PaneReorderHandlers {
 export const PANE_BAND = 24;
 /** Rows per snapshot and per older page. */
 export const TAIL = 100;
+
+/** Why another host's chat shows nothing here, naming the host as the sidebar does (its label). */
+function OtherHostNotice({ hostId, p }: { hostId: string; p: Palette }) {
+  const { t } = useTranslation(panesText);
+  const host = useHosts().find((h) => h.serverId === hostId)?.label || hostId;
+  return (
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16, gap: 8 }}>
+      <Icon name="ServerOff" size={20} color={p.muted} />
+      <Text style={{ color: p.muted, fontSize: 12, textAlign: "center" }}>{t("otherHost", { host })}</Text>
+    </View>
+  );
+}
 
 export const Pane = memo(function Pane({
   agent,
@@ -187,10 +199,7 @@ export const Pane = memo(function Pane({
           <PermissionBanner onOpen={() => onOpen(agent)} p={p} />
         ) : null}
         {otherHost ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16, gap: 8 }}>
-            <Icon name="ServerOff" size={20} color={p.muted} />
-            <Text style={{ color: p.muted, fontSize: 12, textAlign: "center" }}>{t("otherHost", { host: otherHost })}</Text>
-          </View>
+          <OtherHostNotice hostId={otherHost} p={p} />
         ) : (
           <PaneBody agent={agent} p={p} gone={gone} onUnavailable={setRefused} onHostRefused={() => setHostRefused(true)} />
         )}
