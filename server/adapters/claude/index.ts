@@ -10,16 +10,16 @@ import { displaySource, filterCatalog, parseAuth, parseCatalog, parseInstalled, 
 import { checkMarketplaceSource, checkName } from "../../core/source.ts";
 
 function runtime(profile: ProfileRuntime | null) {
-  if (!profile) throw new Error("Claude 프로필이 필요합니다.");
+  if (!profile) throw new Error("claude plugins need a profile");
   return profile;
 }
 
 function errorOf(result: ExecResult, secrets: string[]) {
   if (result.spawnError) return result.spawnError;
-  if (result.timedOut) return "Claude CLI 응답 시간이 초과되었습니다.";
-  if (result.truncated) return "Claude CLI 출력이 크기 제한을 초과했습니다.";
+  if (result.timedOut) return "timed out";
+  if (result.truncated) return "output exceeded the size limit";
   if (result.code === 0) return null;
-  return failureReason(result.stdout, result.stderr, secrets) ?? `Claude CLI 종료 코드: ${result.code}`;
+  return failureReason(result.stdout, result.stderr, secrets) ?? `exit ${result.code}`;
 }
 
 async function read(profile: ProfileRuntime, args: string[], cwd?: string | null) {
@@ -34,7 +34,7 @@ function parseOutput(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error("Claude CLI의 JSON 응답이 불완전합니다. 출력 크기 제한을 확인하세요.");
+    throw new Error("Claude CLI returned incomplete JSON. Check the output size limit.");
   }
 }
 
@@ -53,7 +53,7 @@ async function mutate(profile: ProfileRuntime, action: ActionPreview, cwd?: stri
 function scopedPreview(action: ActionPreview, scope: string | null, cwd: string | null) {
   if (cwd) return { ...action, warnings: [...action.warnings, "project: " + cwd] };
   if (scope === "user") return action;
-  return { ...action, supported: false, warnings: ["프로젝트 디렉터리를 선택하거나 user 범위를 지정하세요.", ...action.warnings] };
+  return { ...action, supported: false, warnings: ["project scope needs a workspace directory", ...action.warnings] };
 }
 
 function addPreview(profile: ProfileRuntime, cwd: string | null, server: McpAddInput) {
@@ -71,14 +71,14 @@ function pluginPreview(profile: ProfileRuntime, action: PluginAction, id: string
 function needsProject(plan: ActionPreview, scope: string | null, cwd: string | null | undefined): ActionPreview {
   if (!scope || scope === "user") return plan;
   if (cwd) return { ...plan, warnings: [...plan.warnings, scope + ": " + cwd] };
-  return { ...plan, supported: false, warnings: ["프로젝트 디렉터리를 선택해야 " + scope + " 범위에 설치할 수 있습니다.", ...plan.warnings] };
+  return { ...plan, supported: false, warnings: [`${scope} scope needs a workspace directory`, ...plan.warnings] };
 }
 
-const THIRD_PARTY = "마켓플레이스에 등록되지 않은 출처의 플러그인입니다. 신뢰하는 출처인지 확인하세요.";
+const THIRD_PARTY = "This plugin source is not a marketplace you added. Install it only if you trust the source.";
 
 /** `claude plugin install <name> --marketplace <source>`: adds the marketplace (user settings) if needed. */
 async function sourcePlan(profile: ProfileRuntime, source: PluginSourceInput, cwd: string | null | undefined): Promise<ActionPreview> {
-  if (source.kind !== "marketplace") return { command: [], source: null, warnings: ["Claude는 마켓플레이스 출처만 지원합니다."], supported: false };
+  if (source.kind !== "marketplace") return { command: [], source: null, warnings: ["Claude installs plugins from marketplace sources only."], supported: false };
   const name = checkName(source.plugin, "Plugin name");
   if (!name.ok) return { command: [], source: null, warnings: [name.error], supported: false };
   const market = await checkMarketplaceSource(source.value);
@@ -86,7 +86,7 @@ async function sourcePlan(profile: ProfileRuntime, source: PluginSourceInput, cw
   const scope = source.scope ?? null;
   const args = ["plugin", "install", "--json", ...(scope ? ["-s", scope] : []), "--marketplace", market.value, "--", name.value];
   const shown = displaySource(market.value);
-  const plan = preview(profile, args, shown, [THIRD_PARTY, "아직 추가되지 않은 마켓플레이스는 user 설정에 함께 추가됩니다."]);
+  const plan = preview(profile, args, shown, [THIRD_PARTY, "A marketplace that is not added yet is also added to the user settings."]);
   return needsProject(plan, scope, cwd);
 }
 
@@ -256,7 +256,7 @@ export const claudeAdapter: ProviderAdapter = {
       try { return parseAuth(result.stdout); } catch { /* Ignore malformed output. */ }
     }
     return { state: result.spawnError?.includes("ENOENT") ? "not_installed" : "unknown",
-      method: null, account: null, detail: errorOf(result, Object.values(profile.env)) ?? "인증 상태를 읽을 수 없습니다." };
+      method: null, account: null, detail: errorOf(result, Object.values(profile.env)) ?? "Could not read the login status." };
   },
   async listMcp(profile, cwd) {
     const p = runtime(profile);
@@ -281,7 +281,7 @@ export const claudeAdapter: ProviderAdapter = {
   },
   async loginMcp(profile, _cwd, name) {
     return { command: [], ok: false, output: "", needsReload: false,
-      error: `${profile.id} 프로필로 Claude 터미널을 열고 /mcp에서 ${name} 인증을 완료하세요. mcp login --no-browser는 리디렉션 URL 입력이 필요합니다.` };
+      error: `Open Claude in a terminal with profile ${profile.id} and authenticate ${name} in /mcp. mcp login --no-browser needs the redirect URL entered.` };
   },
   async listInstalled(profile, cwd) {
     const p = runtime(profile);
