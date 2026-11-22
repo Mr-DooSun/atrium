@@ -1,12 +1,27 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
-/** Same as Paseo's own "remove project": archives its sessions, keeps every file on disk. */
-export const removeProject = defineRpc({
-  name: "project.remove",
-  input: z.object({ projectId: z.string().min(1) }),
-  output: z.object({ ok: z.literal(true) }),
+/** Project host namespace, independent of the daemon storing this sidebar's preferences. */
+export const projectHostIdSchema = z.string().min(1).max(256).regex(/^\S+$/);
+
+/** Sidebar visibility only; these RPCs never remove Paseo projects or archive sessions. */
+export const hiddenProjectSchema = z.object({ hostId: projectHostIdSchema, projectId: z.string().min(1) });
+export type HiddenProject = z.infer<typeof hiddenProjectSchema>;
+export const projectVisibilityInputSchema = z.object({
+  projectId: z.string().min(1),
+  // Optional for older clients' type compatibility only: the server rejects omission.
+  // The project's host, not the current RPC host. Offline and other-host projects are allowed.
+  hostId: projectHostIdSchema.optional(),
 });
+const visibilityOutput = z.object({ ok: z.literal(true), hiddenProjects: z.array(hiddenProjectSchema) });
+export const hideProject = defineRpc({ name: "project.hide", input: projectVisibilityInputSchema, output: visibilityOutput });
+export const unhideProject = defineRpc({ name: "project.unhide", input: projectVisibilityInputSchema, output: visibilityOutput });
+
+/** @deprecated Use hideProject. Kept as a safe sidebar-hide alias for older clients. */
+export const removeProject = defineRpc({ name: "project.remove", input: projectVisibilityInputSchema, output: visibilityOutput });
+
+/** A host-scoped key; project ids alone can collide across connected hosts. */
+export const hiddenProjectKey = (hostId: string, projectId: string): string => JSON.stringify([hostId, projectId]);
 
 export const worktreeInfoSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }),

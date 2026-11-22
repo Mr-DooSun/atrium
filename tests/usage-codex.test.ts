@@ -508,3 +508,60 @@ test("contract: provider is required and constrained; new window fields validate
   const bad = structuredClone(acct); (bad.rateLimits.windows[0] as { windowMinutes: number }).windowMinutes = 0;
   assert.equal(AccountUsage.safeParse(bad).success, false);
 });
+
+// ---------- A-6: observation time and reset handling through the reader and service ----------
+test("codex reader: observedAt is the log event time and stays put across later reads of the same logs", async () => {
+  const observed = NOW - 3 * H;
+  const { files } = fakeFs({ [day(2026, 1, 10)]: { lines: [tc(observed, L(1), T(1), R(30, NOW + 2 * H))] } });
+  const reader = createCodexUsageReader(files);
+  assert.equal((await reader.read(CFG, NOW)).rateLimits.observedAt, iso(observed));
+  assert.equal((await reader.read(CFG, NOW + 10 * 60_000)).rateLimits.observedAt, iso(observed), "not regenerated on the next read");
+});
+
+test("codex reader: after the reset passes, 0% / not limited / past resetsAt kept / observedAt unchanged", async () => {
+  const observed = NOW - 6 * H;
+  const reset = NOW - H;
+  const { files } = fakeFs({ [day(2026, 1, 10)]: { lines: [tc(observed, L(1), T(1), R(100, reset))] } });
+  const { rateLimits } = await createCodexUsageReader(files).read(CFG, NOW);
+  RateLimits.parse(rateLimits);
+  const five = rateLimits.windows[0];
+  assert.deepEqual([five.utilization, five.limited], [0, false]);
+  assert.equal(five.resetsAt, iso(sec(reset) * 1000));
+  assert.equal(rateLimits.observedAt, iso(observed));
+  assert.notEqual(rateLimits.observedAt, iso(NOW));
+});
+
+test("service.read: a past-reset Codex window is not 'limited' and keeps the log time", async () => {
+  const observed = NOW - 6 * H;
+  const { files } = fakeFs({ [day(2026, 1, 10)]: { lines: [tc(observed, L(1), T(1), R(100, NOW - H))] } });
+  const { svc } = service(files);
+  const codex = await svc.read(codexAcct(CFG));
+  AccountUsage.parse(codex);
+  assert.equal(codex.warningLevel, "ok");
+  assert.equal(codex.rateLimits.observedAt, iso(observed));
+});
+
+test("codexRateLimits keeps windowMinutes on every window so the report can derive durationSeconds", () => {
+  const windows = parseCodexRateWindows(rates(
+    { used_percent: 1, window_minutes: 300, resets_at: sec(NOW + H) },
+    { used_percent: 1, window_minutes: 10_080, resets_at: sec(NOW + H) }));
+  const r = codexRateLimits({ timestamp: NOW - H, windows }, NOW);
+  assert.deepEqual(r.windows.map((w) => w.windowMinutes! * 60), [18_000, 604_800]);
+});
+
+test("codex account detection: quota identity ignores email and is stable for the same account and user", async () => {
+  const mk = (email: string, accountId: string, userId: string) => ({
+    tokens: { id_token: jwt({ email, "https://api.openai.com/auth": { chatgpt_user_id: userId } }), account_id: accountId },
+  });
+  const detect = (files: Record<string, unknown>, homes: string[]) => detectCodexAccounts(
+    homes.map((h) => prof(h, "codex", h)), { ...base, readFile: fileMap(files) });
+  const [a] = await detect({ "/a/auth.json": mk("one@x.com", "t", "u1") }, ["/a"]);
+  const [b] = await detect({ "/b/auth.json": mk("two@x.com", "t", "u1") }, ["/b"]);
+  const [c] = await detect({ "/c/auth.json": mk("one@x.com", "t", "u2") }, ["/c"]);
+  assert.ok(a.quotaIdentity);
+  assert.equal(a.quotaIdentity, b.quotaIdentity);
+  assert.notEqual(a.quotaIdentity, c.quotaIdentity);
+  assert.ok(!/one@x|u1|"t"/.test(a.quotaIdentity!), "hashed, not raw");
+  const [none] = await detect({}, ["/none"]);
+  assert.equal(none.quotaIdentity, undefined, "no auth.json -> no quota identity");
+});

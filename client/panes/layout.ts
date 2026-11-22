@@ -459,3 +459,8 @@ export function addFamilyMembers<P extends PaneRef>(panes: readonly P[], parentO
   const at = last < 0 ? arranged.length : last + 1;
   return arrangeByFamily([...arranged.slice(0, at), ...incoming, ...arranged.slice(at)], parentOf);
 }
+
+/** Whether a family block can swap with a block on its left / right (U-14): only when one is there. */
+export function familyMoves(groupIndex: number, groupCount: number): { canMoveLeft: boolean; canMoveRight: boolean } {
+  return { canMoveLeft: groupIndex > 0, canMoveRight: groupIndex >= 0 && groupIndex < groupCount - 1 };
+}

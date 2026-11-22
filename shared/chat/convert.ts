@@ -13,6 +13,8 @@ type TimelineEntry = {
     id?: unknown;
     kind?: unknown;
     messageId?: unknown;
+    detail?: unknown;
+    agentMessage?: unknown;
   } | null | undefined;
   seqStart: number;
   timestamp: string;
@@ -29,6 +31,10 @@ type ChatLink = {
   rootAgentId: string;
   childAgentIds: string[];
 };
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
 
 function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -68,6 +74,17 @@ export function toChatItem({ item, seqStart, timestamp, seqEnd }: TimelineEntry)
       const callId = stringOrEmpty(item.callId);
       const toolName = stringOrEmpty(item.name) || undefined;
       const status = stringOrEmpty(item.status) || undefined;
+      if (toolName === "agent_message") {
+        const message = record(item.agentMessage);
+        const detail = record(item.detail);
+        const sender = record(message?.sender) ?? record(detail?.sender);
+        const text = typeof message?.text === "string" ? message.text : stringOrEmpty(detail?.text);
+        const senderName = stringOrEmpty(sender?.title) || stringOrEmpty(sender?.id) || stringOrEmpty(detail?.senderName);
+        if (text) return {
+          ...base, id: callId ? `tool:${callId}` : base.id, kind: "user", text,
+          ...(senderName ? { senderName } : {}),
+        };
+      }
       const label = toolName ?? "Tool";
       return {
         ...base,

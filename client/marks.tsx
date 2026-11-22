@@ -39,7 +39,17 @@ function StatusRing({ color }: { color: string }) {
   );
 }
 
+const STATUS_LABEL = {
+  needs_input: "statusNeedsInput",
+  failed: "statusFailed",
+  running: "statusRunning",
+  attention: "statusAttention",
+  done: "statusDone",
+} as const satisfies Record<Bucket, string>;
+
 export function StatusMark({ bucket, p }: { bucket: Bucket; p: Palette }) {
+  // Read out like Paseo's own sidebar does ("waiting for review" and so on), not left silent.
+  const { t } = useTranslation(sidebarText);
   let mark: ReactNode;
   if (bucket === "running") mark = <StatusRing color={p.running} />;
   else if (bucket === "needs_input") mark = <Icon name="CircleAlert" size={12} color={p.warning} />;
@@ -58,7 +68,11 @@ export function StatusMark({ bucket, p }: { bucket: Bucket; p: Palette }) {
     );
   }
   return (
-    <View style={{ width: 16, height: TITLE_LINE, alignItems: "center", justifyContent: "center" }}>
+    <View
+      accessible
+      accessibilityLabel={t(STATUS_LABEL[bucket])}
+      style={{ width: 16, height: TITLE_LINE, alignItems: "center", justifyContent: "center" }}
+    >
       {mark}
     </View>
   );

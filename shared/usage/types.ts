@@ -23,7 +23,7 @@ export const RateLimits = z.object({
   state: z.enum(["ok", "expired", "unauthenticated", "unavailable", "error"]),
   windows: z.array(RateLimitWindow),
   message: z.string().optional(),
-  /** Timestamp of a locally recorded rate-limit snapshot, when available. */
+  /** Actual quota observation time, retained across cached reads. */
   observedAt: z.string().optional(),
   expiresAt: z.string().optional(),
   rejectedStatus: z.union([z.literal(401), z.literal(403)]).optional(),

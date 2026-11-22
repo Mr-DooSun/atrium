@@ -25,21 +25,11 @@ function usageSourceId(provider: AccountUsage["provider"]): string {
   return `${provider}-profiles`;
 }
 
-function usageHarness(provider: AccountUsage["provider"]): string {
-  return provider === "claude" ? "Claude" : "Codex";
-}
-
 type AccountLabel = { label: string; profileIds: string[] };
 
-export function usageAccountLabel(provider: AccountUsage["provider"], account: AccountLabel, accounts: readonly AccountLabel[]): string {
-  const harness = usageHarness(provider);
-  const prefix = new RegExp(`^${harness}(?=\\s|\\(|:|$)\\s*(?:[:·–—-]\\s*)?`, "i");
-  const labelOf = (entry: AccountLabel) => {
-    const original = entry.label.trim();
-    const stripped = original.replace(prefix, "");
-    const label = stripped === original ? original : stripped.replace(/^\(([^()]*)\)$/, "$1").trim();
-    return label || entry.profileIds[0];
-  };
+export function usageAccountLabel(_provider: AccountUsage["provider"], account: AccountLabel, accounts: readonly AccountLabel[]): string {
+  // Profile labels are user-owned names: retain the provider prefix and punctuation.
+  const labelOf = (entry: AccountLabel) => entry.label.trim() || entry.profileIds[0];
   const label = labelOf(account);
   return accounts.filter((entry) => labelOf(entry) === label).length > 1 ? `${label} · ${account.profileIds[0]}` : label;
 }
@@ -74,7 +64,7 @@ function compactTotal(totals: TokenTotals, provider: AccountUsage["provider"]): 
 
 function usageDetails(account: AccountUsage): UsageDetail[] {
   const { identity, local, rateLimits } = account;
-  const details: UsageDetail[] = [];
+  const details: UsageDetail[] = [{ id: "profile", label: "Profile", value: account.label.trim() || account.profileIds[0] }];
   if (identity?.email) details.push({ id: "email", label: "Email", value: identity.email });
   if (local.state !== "unavailable") {
     const periods = [
@@ -97,7 +87,19 @@ function usageDetails(account: AccountUsage): UsageDetail[] {
   return details;
 }
 
-function toUsageWindow(window: RateLimitWindow): UsageWindow {
+// Extra fields are additive on 0.17.1. Attach them after calling the helpers because
+// 0.16.1's helper implementations discard durationSeconds.
+type TimedUsageWindow = UsageWindow & { durationSeconds?: number };
+
+function toUsageWindow(window: RateLimitWindow): TimedUsageWindow {
+  const durationSeconds = window.windowMinutes !== undefined ? window.windowMinutes * 60
+    : window.kind === "five_hour" ? 5 * 3600
+    : window.kind === "seven_day" || window.kind === "model_weekly" ? 7 * 86400 : undefined;
+  const converted = convertUsageWindow(window);
+  return durationSeconds === undefined ? converted : { ...converted, durationSeconds };
+}
+
+function convertUsageWindow(window: RateLimitWindow): UsageWindow {
   const warning = usageWarningLevel({ state: "ok", windows: [window] });
   const common = {
     utilizationPct: window.utilization,
@@ -126,7 +128,7 @@ function toUsageWindow(window: RateLimitWindow): UsageWindow {
   }
 }
 
-export function toUsageReport(account: AccountUsage): UsageReport {
+export function toUsageReport(account: AccountUsage): UsageReport & { observedAt?: string } {
   const limits = account.rateLimits;
   if (limits.rejectedStatus !== undefined) {
     return unavailable({ kind: "rejected", status: limits.rejectedStatus, refreshedBy: account.provider });
@@ -135,12 +137,13 @@ export function toUsageReport(account: AccountUsage): UsageReport {
     return unavailable({ kind: "expired", expiresAt: limits.expiresAt, refreshedBy: account.provider });
   }
   if (limits.state === "unavailable" || limits.state === "unauthenticated") {
-    return unavailable({ kind: "no_quota", detail: limits.message ?? "No usage quota is available for this login." });
+    return unavailable({ kind: "no_quota", detail: limits.message ?? "Check this profile's CLI login and subscription, then refresh." });
   }
-  if (limits.state !== "ok") return { status: "error", error: limits.message ?? "Usage could not be read." };
+  if (limits.state !== "ok") return { status: "error", error: limits.message ?? "Usage could not be refreshed. Try again shortly." };
   return {
     status: "available",
     planLabel: account.identity?.subscriptionType,
+    ...(limits.observedAt ? { observedAt: limits.observedAt } : {}),
     windows: [...new Map(limits.windows.map(toUsageWindow).map((window) => [window.id, window])).values()],
     details: usageDetails(account),
   };
@@ -153,7 +156,7 @@ async function readConfiguredProfiles(home: string, cwd: string, env: NodeJS.Pro
     return resolveConfiguredProfiles(config, adapters);
   } catch (error) {
     if ((error as NodeJS.ErrnoException | null)?.code === "ENOENT") return [];
-    throw new Error("Paseo provider configuration could not be read.");
+    throw new Error("Check the provider configuration in Paseo, then refresh usage.");
   }
 }
 
@@ -171,13 +174,39 @@ export function createUsageSources(options: UsageSourceOptions = {}): UsageSourc
       const excludeConfigHomes = await builtinUsageHomes(provider, options.detection);
       const detection = { ...options.detection, excludeConfigHomes };
       const profiles = await loadProfiles();
-      return provider === "claude"
-        ? detectClaudeAccounts(profiles, detection) : detectCodexAccounts(profiles, detection);
+      const detectAccounts = provider === "claude" ? detectClaudeAccounts : detectCodexAccounts;
+      const accounts = await detectAccounts(profiles, detection);
+      if (!accounts.length) return accounts;
+      // Default routes may not occur in the configured profiles. Read their local identity
+      // too, so copying a login to another home does not add a second quota card.
+      const envKey = provider === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
+      const defaultEnv = { ...env };
+      delete defaultEnv[envKey];
+      const builtinProfiles = [{
+        profile: { id: provider, label, kind: provider }, runtime: { configHome: null },
+      }];
+      const defaults = (await Promise.all([
+        detectAccounts(builtinProfiles, { ...options.detection, env: defaultEnv }),
+        detectAccounts(builtinProfiles, options.detection),
+      ])).flat();
+      const covered = new Set(defaults.flatMap((account) => account.quotaIdentity ? [account.quotaIdentity] : []));
+      const unique = new Map<string, (typeof accounts)[number]>();
+      for (const account of accounts) {
+        const identity = account.quotaIdentity;
+        if (identity && covered.has(identity)) continue;
+        const key = identity ?? await canonical(account.configHome);
+        const existing = unique.get(key);
+        if (existing) existing.profileIds.push(...account.profileIds);
+        else unique.set(key, account);
+      }
+      return [...unique.values()];
     }
 
     return {
       id: usageSourceId(provider),
-      label,
+      // Native cards use this fixed source label as their title and default sort key.
+      // A suffix places additional profiles after the provider's default source; user order wins.
+      label: `${label} profiles`,
       icon: `server/usage/${provider}.svg`,
       input: usageSourceInput,
       async discover(scope) {
@@ -185,24 +214,25 @@ export function createUsageSources(options: UsageSourceOptions = {}): UsageSourc
         const accounts = await detect();
         usage.retainAccounts(provider, accounts);
         return Promise.all(accounts.map(async (account) => ({
-          key: hashAccountKey(JSON.stringify([provider, await canonical(account.configHome)])),
+          key: hashAccountKey(JSON.stringify(account.quotaIdentity
+            ? [provider, "account", account.quotaIdentity] : [provider, await canonical(account.configHome)])),
           label: usageAccountLabel(provider, account, accounts),
-          harness: label,
+          harness: usageAccountLabel(provider, account, accounts),
           input: { provider, configHome: account.configHome },
         })));
       },
       async fetch(value) {
         const input = usageSourceInput.safeParse(value);
         if (!input.success || input.data.provider !== provider) {
-          return { status: "error", error: "Invalid usage account locator." };
+          return { status: "error", error: "Refresh the usage panel and choose this profile again." };
         }
         try {
           // Resolve the configured route again; the locator cannot select arbitrary credential files.
           const account = (await detect()).find((entry) => entry.configHome === input.data.configHome);
-          if (!account) return { status: "error", error: "This usage account is no longer configured." };
+          if (!account) return { status: "error", error: "This profile was removed. Refresh the usage panel." };
           return toUsageReport(await usage.read(account));
         } catch {
-          return { status: "error", error: "Usage could not be read for this account." };
+          return { status: "error", error: "Check this profile's configuration and CLI login, then refresh." };
         }
       },
     };

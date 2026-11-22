@@ -91,7 +91,7 @@ export function parseCodexTokenCountLine(line: string): CodexTokenCount | undefi
 
 export function codexRateLimits(snapshot: CodexRateSnapshot | undefined, now: number): RateLimits {
   if (!snapshot) {
-    return { state: "unavailable", windows: [], message: "No Codex rate limits recorded in local session logs." };
+    return { state: "unavailable", windows: [], message: "Send a prompt in this profile's Codex CLI; use codex login if needed." };
   }
   return {
     state: "ok",

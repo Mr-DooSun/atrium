@@ -1,6 +1,5 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PanResponder, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAgent,
   useAgents,
@@ -16,9 +15,9 @@ import {
   type ProjectRef,
   type WorkspaceRef,
 } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/ui";
+import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@getpaseo/plugin";
-import { MAX_WORKTREE_CWDS, checkoutKey, projectWorktrees, worktreeKey, type WorktreeInfo } from "../shared/project-rpc";
+import { checkoutKey, worktreeKey, type WorktreeInfo } from "../shared/project-rpc";
 import { branchesBelow, buildTree, checkoutLanes, workspacesEmptiedBy, type Lane, type TreeNode } from "../shared/tree";
 import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, worktreeBadge, worktreeColor, type Palette } from "./look";
 import { ProviderMark, StatusMark, URGENT, WorktreeBadge, WorktreeBar, WorktreeMark, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
@@ -31,8 +30,8 @@ import {
   type ArchiveTarget,
   type EmptiedWorkspaces,
 } from "./archive";
-import { RenameButton, RenameModal, useRename } from "./rename";
-import { RemoveProjectModal, useRemoveProject } from "./remove-project";
+import { RenameButton, RenameModal, renameFallback, useRename } from "./rename";
+import { HiddenProjects, HideProjectModal, useHideProject } from "./hide-project";
 import { MoveButton, PanesButton, ProjectMenu, ReorderBar, SessionMenu, isPaneDrag, outsideSidebar, useProjectOrder } from "./project-order";
 import {
   beginSessionDrag,
@@ -57,6 +56,10 @@ import {
 } from "../shared/project-order";
 import { sidebarText } from "./sidebar-strings";
 import { usePendingPermissions } from "./pending-permissions";
+import { useWorktrees } from "./worktrees";
+import { useCollapsed } from "./collapsed-store";
+import { displayedOrder, hiddenKeySet, isHiddenProject, reorderSection, sectionSaved, visibleProjectBlocks } from "./sidebar-visibility";
+import { workspaceCustomTitle, workspaceRowLabel } from "./workspace-naming";
 
 const ROOT = "__root__";
 
@@ -176,92 +179,8 @@ const visibleWorkspace = (w: PluginWorkspaceSnapshot) => !w.background && !w.arc
 // session is still there and Paseo's own sidebar keeps it. Archived agents never reach here.
 const visibleAgent = (a: PluginAgentSnapshot) => !a.background;
 
-const WORKTREE_REFRESH_MS = 20_000;
-const NO_WORKTREES: ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>> = new Map();
-const OWN_HOST_KEY = ["atrium", "worktrees", "host"] as const;
-
-/**
- * The git worktree and branch of every session folder, asked of the server in batches. A session
- * can switch branches while it works, so the answer is refreshed now and then (the server caches
- * each folder for a few seconds as well); between refreshes the last answer stays on screen.
- *
- * Only the plugin's own daemon can look into a folder, so only its host's sessions are asked
- * about, and the map is keyed by `worktreeKey(hostId, cwd)`: the same path on another host is a
- * different folder. Other hosts' rows keep Paseo's own branch line.
- */
-function useWorktrees(): ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>> {
-  const fetchWorktrees = useRpc(projectWorktrees);
-  const queryClient = useQueryClient();
-  const ownHost = useOwnHost(fetchWorktrees);
-  const onOwnHost = useCallback((s: { hostId: string }) => ownHost !== null && s.hostId === ownHost, [ownHost]);
-  // Agents grouped by the folder they work in: one entry per distinct cwd.
-  const byCwd = useAgents({ where: (a) => visibleAgent(a) && onOwnHost(a), groupBy: (a) => a.cwd });
-  // Sorted and distinct, so the key only changes when the set of folders does, not their order.
-  // A workspace's own folder is asked about too: a workspace with one agent is drawn as one row.
-  const byDirectory = useWorkspaces({ where: (w) => visibleWorkspace(w) && onOwnHost(w), groupBy: (w) => w.directory });
-  const cwds = useMemo(
-    () => [...new Set([...byCwd, ...byDirectory].map((g) => g.key).filter((c) => c.length > 0))].sort(),
-    [byCwd, byDirectory],
-  );
-  const cwdsKey = cwds.join("\n");
-  const query = useQuery({
-    queryKey: ["atrium", "worktrees", ownHost, cwdsKey],
-    queryFn: async () => {
-      const found = new Map<string, Extract<WorktreeInfo, { kind: "git" }>>();
-      if (ownHost === null) return found;
-      for (let i = 0; i < cwds.length; i += MAX_WORKTREE_CWDS) {
-        const { hostId, worktrees } = await fetchWorktrees({ cwds: cwds.slice(i, i + MAX_WORKTREE_CWDS) });
-        // Another daemon answers now (the sidebar was moved to another host, or ownHost was only
-        // a guess): its folders are not ownHost's. Learn its name; the next round asks its own sessions.
-        if (hostId !== null && hostId !== ownHost) {
-          queryClient.setQueryData(OWN_HOST_KEY, hostId);
-          return new Map<string, Extract<WorktreeInfo, { kind: "git" }>>();
-        }
-        for (const [cwd, info] of Object.entries(worktrees)) {
-          if (info.kind === "git") found.set(worktreeKey(ownHost, cwd), info);
-        }
-      }
-      return found;
-    },
-    enabled: ownHost !== null && cwds.length > 0,
-    staleTime: WORKTREE_REFRESH_MS,
-    refetchInterval: WORKTREE_REFRESH_MS,
-    refetchIntervalInBackground: false,
-    placeholderData: keepPreviousData,
-    retry: 1,
-  });
-  // A failed refresh (or a server without project.worktrees) keeps the last answer, or none: the
-  // rows lose their badge at worst and the sidebar is unaffected. An answer is only kept for the
-  // host it was asked of: when the host becomes unknown or changes, the badges go rather than freeze.
-  const last = useRef<{ host: string | null; map: ReadonlyMap<string, Extract<WorktreeInfo, { kind: "git" }>> }>({ host: null, map: NO_WORKTREES });
-  if (last.current.host !== ownHost) last.current = { host: ownHost, map: NO_WORKTREES };
-  if (ownHost !== null && query.data && query.isPlaceholderData === false) last.current = { host: ownHost, map: query.data };
-  return last.current.map;
-}
-
-/**
- * The host id of the daemon serving this plugin's RPCs, or null while unknown. The daemon names
- * itself in every project.worktrees answer; an older server does not, and then the only host it
- * can be is the single configured one. With several hosts and no name, no folder is asked about.
- * `useWorktrees` renames it when a later answer names a different daemon.
- */
-function useOwnHost(fetchWorktrees: (input: { cwds: string[] }) => Promise<{ hostId: string | null }>): string | null {
-  const hosts = useHosts();
-  const named = useQuery({
-    queryKey: OWN_HOST_KEY,
-    queryFn: async () => (await fetchWorktrees({ cwds: [] })).hostId,
-    // Once named, the host never changes; an unnamed answer is asked again now and then.
-    staleTime: (q) => (q.state.data ? Infinity : WORKTREE_REFRESH_MS),
-    refetchInterval: (q) => (q.state.data ? false : WORKTREE_REFRESH_MS * 3),
-    refetchIntervalInBackground: false,
-    retry: 1,
-  });
-  if (named.data) return named.data;
-  if (named.isSuccess && hosts.length === 1) return hosts[0].serverId;
-  return null;
-}
-
 export function NestedSidebar(view: PluginSidebarViewProps) {
+  const { t } = useTranslation(sidebarText);
   // The free chat folder's workspaces live in the pinned section below, not in the tree.
   const chatDir = useChatDir();
   const pendingPermissions = usePendingPermissions();
@@ -388,13 +307,29 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     (projectKey: string) => (hostSections ? (projectRefs.get(projectKey)?.hostId ?? null) : null),
     [hostSections, projectRefs],
   );
+  const hiddenKeys = useMemo(() => hiddenKeySet(order.hidden), [order.hidden]);
+  // Order keys of hidden projects: their place in the saved order survives reordering the rest.
+  const hiddenRoots = useMemo(
+    () => new Set(projects.filter((r) => isHiddenProject(r, hiddenKeys)).map((r) => rootOf(r.key))),
+    [projects, hiddenKeys, rootOf],
+  );
 
   // Projects with sessions in tree order (most recent work first), then empty ones by name.
-  const blocks = useMemo(() => {
+  const allBlocks = useMemo(() => {
     const all: { projectKey: string; roots: readonly TreeNode[] }[] = [...tree];
     const inTree = new Set(tree.map((b) => b.projectKey));
     for (const ref of projects) if (!inTree.has(ref.key)) all.push({ projectKey: ref.key, roots: [] });
-    const shown = all.filter((b) => projectRefs.has(b.projectKey));
+    return all;
+  }, [tree, projects]);
+  // What a reorder starts from: every project where the sidebar puts it now, hidden ones included,
+  // so a hidden project keeps its place even when the saved order has never named it.
+  const baseOrder = useMemo(
+    () => displayedOrder(allBlocks.map((b) => rootOf(b.projectKey)), savedOrder),
+    [allBlocks, savedOrder, rootOf],
+  );
+  const blocks = useMemo(() => {
+    // Hidden from this sidebar (project.hide): by host and id, since ids can repeat across hosts.
+    const shown = visibleProjectBlocks(allBlocks, projectRefs, hiddenKeys);
     // A hand-set order, when there is one, wins over recent work, for projects and the sessions
     // under them at every depth.
     const ordered = applyOrder(shown, savedOrder, (b) => rootOf(b.projectKey)).map((b) => ({
@@ -404,7 +339,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     if (!hostSections) return ordered;
     // Hosts in the app's order, a host it no longer lists last; projects keep their order inside.
     return sectionByHost(ordered, (b) => hostOf(b.projectKey), hosts.map((h) => h.serverId));
-  }, [tree, projects, projectRefs, savedOrder, rootOf, rootGroup, nodeOrders, hostSections, hosts, hostOf]);
+  }, [allBlocks, projectRefs, hiddenKeys, savedOrder, rootOf, rootGroup, nodeOrders, hostSections, hosts, hostOf]);
 
   const [reordering, setReordering] = useState(false);
   // A project moves among its own host's projects: a place in another host's section would not show.
@@ -423,9 +358,10 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   const moveProject = useCallback(
     (key: string, delta: -1 | 1) => {
       const shown = sectionOf(key).map((b) => rootOf(b.projectKey));
-      order.save(move(shown, savedOrder, rootOf(key), delta));
+      const host = hostOf(key);
+      order.save(reorderSection(baseOrder, move(shown, sectionSaved(baseOrder, host), rootOf(key), delta), host, hiddenRoots));
     },
-    [sectionOf, order, savedOrder, rootOf],
+    [sectionOf, hostOf, order, baseOrder, rootOf, hiddenRoots],
   );
   const projectsGroupOf = useCallback((projectKey: string) => projectsGroup(hostOf(projectKey)), [hostOf]);
 
@@ -583,13 +519,16 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
       if (!land) return;
       const shown = land.all.map((b) => b.key);
       if (isProjectsGroup(target.group)) {
-        order.save(placeAt(shown.map(rootOf), savedOrder, rootOf(target.key), land.at));
+        // Within the dragged project's host section; other hosts' places are left as they are.
+        const host = hostOf(target.key);
+        const next = placeAt(shown.map(rootOf), sectionSaved(baseOrder, host), rootOf(target.key), land.at);
+        order.save(reorderSection(baseOrder, next, host, hiddenRoots));
       } else {
         // Only the children shown now: archived sessions do not come back, so they need no place.
         order.saveNodes(target.group, placeAt(shown, [], target.key, land.at));
       }
     },
-    [landing, order, savedOrder, rootOf, stopTimer],
+    [landing, hostOf, order, baseOrder, rootOf, hiddenRoots, stopTimer],
   );
   const dropMark = useMemo((): DropMark | null => {
     if (!drag) return null;
@@ -620,10 +559,32 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   const lastX = useRef(0);
   const latestDrag = useRef({ dragMove, dragEnd, endPane });
   latestDrag.current = { dragMove, dragEnd, endPane };
+  /** This gesture pulled a row with no chat (a workspace with no agent yet) toward the panes:
+   *  said so once, and the rest of the gesture is dropped instead of reordering on release. */
+  const noChatDrag = useRef(false);
+  const toast = useToast();
+  const noChatText = t("panesNoChat");
+  const noChatRef = useRef({ toast, noChatText });
+  noChatRef.current = { toast, noChatText };
   /** One step of the gesture: a reorder move, or a pane drag once the pointer leaves the sidebar. */
   const step = (target: DragTarget) => {
     const { dragMove, dragEnd, endPane } = latestDrag.current;
     const payload = isProjectsGroup(target.group) ? undefined : payloads.current.get(target.key);
+    if (noChatDrag.current) return;
+    if (!payload && !isProjectsGroup(target.group) && isPaneDrag({
+      x: lastX.current,
+      startX: pressX.current,
+      left: frameBox.current.left,
+      right: frameBox.current.right,
+      active: false,
+      dropZones: hasDropZones(),
+    })) {
+      // Nothing to open: put the row back and say why, instead of a drop that silently does nothing.
+      noChatDrag.current = true;
+      dragEnd(target, null);
+      noChatRef.current.toast.show(noChatRef.current.noChatText);
+      return;
+    }
     if (payload) {
       const toward = isPaneDrag({
         x: lastX.current,
@@ -686,6 +647,10 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
         onPanResponderRelease: () => {
           const target = pressedRef.current;
           pressedRef.current = null;
+          if (noChatDrag.current) {
+            noChatDrag.current = false;
+            return;
+          }
           if (paneMode.current) {
             latestDrag.current.endPane({ x: lastX.current, y: lastY.current });
             return;
@@ -696,6 +661,10 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
         onPanResponderTerminate: () => {
           const target = pressedRef.current;
           pressedRef.current = null;
+          if (noChatDrag.current) {
+            noChatDrag.current = false;
+            return;
+          }
           if (paneMode.current) {
             latestDrag.current.endPane(null);
             return;
@@ -707,15 +676,8 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     [],
   );
 
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
-  const toggle = useCallback((key: string) => {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
+  // Kept across reloads (web, Electron), like the project and session order.
+  const [collapsed, toggle] = useCollapsed();
 
   const lanes = useMemo(() => {
     const all = new Map<string, Lane>();
@@ -811,6 +773,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
           </Fragment>
         );
       })}
+      {reordering ? null : <HiddenProjects hidden={order.hidden} p={p} />}
     </ScrollView>
     </View>
     <ChatSection view={view} p={p} chatDir={chatDir} />
@@ -1184,11 +1147,12 @@ function Leading({
   hovered: boolean;
   ctx: Ctx;
 }) {
+  const { t } = useTranslation(sidebarText);
   if (!ctx.compact && node.children.length > 0 && (hovered || !open)) {
     return (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={open ? "Collapse" : "Expand"}
+        accessibilityLabel={t(open ? "collapse" : "expand")}
         hitSlop={6}
         onPress={ctx.guard(() => ctx.toggle(node.key))}
         style={{ width: 16, height: TITLE_LINE, alignItems: "center", justifyContent: "center" }}
@@ -1202,11 +1166,12 @@ function Leading({
 
 /** Compact layouts have no hover, so rows with children keep a trailing toggle. */
 function CompactToggle({ node, open, ctx }: { node: TreeNode; open: boolean; ctx: Ctx }) {
+  const { t } = useTranslation(sidebarText);
   if (!ctx.compact || node.children.length === 0) return null;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={open ? "Collapse" : "Expand"}
+      accessibilityLabel={t(open ? "collapse" : "expand")}
       hitSlop={8}
       onPress={() => ctx.toggle(node.key)}
       style={{ height: TITLE_LINE, justifyContent: "center" }}
@@ -1273,6 +1238,9 @@ function titleStyle(ctx: Ctx, emphasized: boolean) {
     fontSize: 14,
     lineHeight: TITLE_LINE,
     opacity: emphasized ? 1 : 0.76,
+    // The layout stays left to right in every language; without this, react-native-web aligns
+    // Arabic text to the right, away from its icon.
+    textAlign: "left",
   } as const;
 }
 
@@ -1306,7 +1274,7 @@ function WorkspaceRow({
   const ws = useWorkspace(reference ?? node.key, (w) => ({
     label: w.title ?? w.name,
     title: w.title,
-    folder: w.name,
+    customTitle: workspaceCustomTitle(w),
     branch: w.branch,
     directory: w.directory,
     indicator: w.indicator,
@@ -1343,9 +1311,14 @@ function WorkspaceRow({
     : inWorkspace && !activeAgent;
   const root = useAgent(rootAgent ?? node.key, (a) => ({
     provider: a.provider,
+    title: a.title,
     activeTurn: isAgentTurnActive(a.status),
     bucket: agentBucket(a, ctx.hasPendingPermission(a.ref)),
   }));
+  // A workspace drawn as one row with its only agent and no name of its own reads as that agent.
+  const label = ws
+    ? workspaceRowLabel({ customTitle: ws.customTitle, name: ws.label, singleAgent: !!node.agentKey, agentTitle: root?.title })
+    : undefined;
   const emptied = useEmptiedWorkspaces(node, ctx);
   const target: ArchiveTarget | null = useMemo(
     () =>
@@ -1363,13 +1336,13 @@ function WorkspaceRow({
   );
   const archive = useArchive(target);
   const rename = useRename(reference ?? null, ws?.title ?? null);
-  const payload = useSessionPayload(node.key, rootAgent, ws?.label, ctx);
+  const payload = useSessionPayload(node.key, rootAgent, label, ctx);
   const [menu, setMenu] = useState(false);
   const open_ = () =>
     rootAgent
       ? ctx.view.navigation.openAgent(rootAgent)
       : reference && ctx.view.navigation.openWorkspace(reference);
-  if (!ws || !reference) return null;
+  if (!ws || !reference || label === undefined) return null;
   const { p } = ctx;
   const hidden = open ? 0 : countDescendants(node);
   const bucket = mostUrgent(ws.indicator, root?.bucket === "needs_input" ? root.bucket : null, below);
@@ -1378,14 +1351,14 @@ function WorkspaceRow({
   const modal = target ? (
     <ArchiveModal
       state={archive}
-      title={ws.label}
+      title={label}
       target={target}
       descendants={countDescendants(node)}
       danger={(target.kind === "workspace" && target.worktree) || target.emptied.worktrees > 0}
       p={p}
     />
   ) : null;
-  const renameModal = <RenameModal state={rename} folder={ws.folder} p={p} />;
+  const renameModal = <RenameModal state={rename} fallback={renameFallback(ws.branch, ws.directory)} p={p} />;
   // A branch only says something when the row works in its own worktree; rows on the project's
   // checkout would all repeat the same branch.
   const worktree = ctx.worktrees.get(worktreeKey(reference.hostId, ws.directory)) ?? null;
@@ -1401,19 +1374,20 @@ function WorkspaceRow({
     {modal}
     {renameModal}
     <SessionMenu
-      name={ws.label}
+      name={label}
       open={menu}
       onClose={() => setMenu(false)}
       onOpenInPanes={payload ? () => openInPanes(payload) : undefined}
+      onRename={rename.begin}
       onArchive={canArchive ? archive.begin : undefined}
       p={p}
     />
     <Row
       depth={depth}
       active={active}
-      label={`Open ${ws.label}`}
+      label={t("openRow", { name: label })}
       onPress={open_}
-      onLongPress={payload || canArchive ? () => setMenu(true) : undefined}
+      onLongPress={() => setMenu(true)}
       ctx={ctx}
     >
       {(hovered) => (
@@ -1435,7 +1409,7 @@ function WorkspaceRow({
           <View style={{ flex: 1, minWidth: 0, gap: ROW.lineGap }}>
             <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
               <Text numberOfLines={1} style={titleStyle(ctx, hovered || active)}>
-                {ws.label}
+                {label}
               </Text>
               {worktree && badge && !showBadge ? <WorktreeMark info={worktree} spec={badge} p={p} /> : null}
               {ws.additions !== null && ws.deletions !== null ? (
@@ -1446,7 +1420,8 @@ function WorkspaceRow({
               ) : null}
               {hovered && !archive.confirming && !rename.editing ? (
                 <View style={{ flexDirection: "row", gap: 2 }}>
-                  {payload ? <PanesButton onPress={ctx.guard(() => openInPanes(payload))} p={p} /> : null}
+                  {/* No agent yet: nothing to open, and the dimmed button says so rather than vanish. */}
+                  <PanesButton onPress={payload ? ctx.guard(() => openInPanes(payload)) : undefined} p={p} />
                   <RenameButton onPress={ctx.guard(rename.begin)} p={p} />
                   {canArchive ? <ArchiveButton onPress={ctx.guard(archive.begin)} p={p} /> : null}
                   {bucket === "needs_input" ? <StatusMark bucket={bucket} p={p} /> : null}
@@ -1554,7 +1529,7 @@ function AgentRow({
     <Row
       depth={depth}
       active={active}
-      label={`Open agent ${agent.label}`}
+      label={t("openAgentRow", { name: agent.label })}
       onPress={() => ctx.view.navigation.openAgent(reference)}
       onLongPress={payload || canArchive ? () => setMenu(true) : undefined}
       ctx={ctx}
@@ -1676,10 +1651,10 @@ function ProjectRow({
   const { t } = useTranslation(sidebarText);
   const displayName = useProject(reference, (pr) => pr.displayName);
   const host = ctx.hostLabel(reference.hostId);
-  // Menus and the remove dialog name the host too, so the right one of two same-named projects goes.
+  // Menus and the hide dialog name the host too, so the right one of two same-named projects is meant.
   const name = displayName && host ? `${displayName} · ${host}` : displayName;
   const [hovered, setHovered] = useState(false);
-  const remove = useRemoveProject(reference);
+  const hide = useHideProject(reference);
   const [menu, setMenu] = useState(false);
   const { index, last } = ctx.projectIndex.get(reference.key) ?? { index: 0, last: 0 };
   const dragTarget = useContext(DragTargetContext);
@@ -1687,17 +1662,22 @@ function ProjectRow({
   // Folded, the header stands in for its rows: it shows the most urgent state among them.
   const workspaceUrgency = useUrgentInProject(reference, !open);
   const urgent = hasPendingPermission ? "needs_input" : workspaceUrgency;
+  // Folded over the workspace that is open right now: the header is the only place left to show it.
+  const activeKey = ctx.view.active.workspace?.key ?? null;
+  const holdsActive = useWorkspaces({
+    where: (w) => !open && activeKey !== null && w.ref.key === activeKey && w.project.key === reference.key,
+  }).length > 0;
   const { p } = ctx;
   if (!name) return null;
   return (
     <>
-    <RemoveProjectModal reference={reference} name={name} state={remove} p={p} />
+    <HideProjectModal name={name} state={hide} p={p} />
     <ProjectMenu
       name={name}
       open={menu}
       onClose={() => setMenu(false)}
       onReorder={ctx.startReorder}
-      onRemove={remove.begin}
+      onHide={hide.begin}
       p={p}
     />
     {/* Hover is tracked on the whole header so moving onto its buttons keeps them shown. */}
@@ -1709,7 +1689,7 @@ function ProjectRow({
     >
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
+        accessibilityState={{ expanded: open, selected: holdsActive }}
         accessibilityLabel={name}
         onPress={ctx.guard(() => (ctx.reordering ? undefined : ctx.toggle(reference.key)))}
         // Desktop reorders by dragging, so a long press does nothing there. Compact layouts have no
@@ -1735,7 +1715,11 @@ function ProjectRow({
           />
         </View>
         {/* Not selectable, so dragging the header never selects its name. */}
-        <Text numberOfLines={1} selectable={false} style={{ flex: 1, color: p.muted, fontSize: 14 }}>
+        <Text
+          numberOfLines={1}
+          selectable={false}
+          style={{ flex: 1, color: holdsActive ? p.foreground : p.muted, fontSize: 14, fontWeight: holdsActive ? "600" : "400", textAlign: "left" }}
+        >
           {displayName}
         </Text>
       </Pressable>
@@ -1748,7 +1732,7 @@ function ProjectRow({
       <>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`New workspace in ${name}`}
+        accessibilityLabel={t("newWorkspaceIn", { name })}
         hitSlop={6}
         onPress={ctx.guard(() => ctx.view.navigation.openProject(reference))}
         style={({ pressed }) => ({
@@ -1765,18 +1749,18 @@ function ProjectRow({
       >
         <Icon name="Plus" size={14} color={p.muted} />
       </Pressable>
-      {!open && !ctx.reordering && urgent !== "done" && !(hovered && !remove.confirming) ? (
-        // Same slot as the remove button, which takes it over on hover, as rows do with archive.
+      {!open && !ctx.reordering && urgent !== "done" && !(hovered && !hide.confirming) ? (
+        // Same slot as the hide button, which takes it over on hover, as rows do with archive.
         <View pointerEvents="none" style={{ position: "absolute", right: 38, top: ROW.paddingVertical }}>
           <StatusMark bucket={urgent} p={p} />
         </View>
       ) : null}
-      {hovered && !remove.confirming ? (
+      {hovered && !hide.confirming ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t("remove")}
+          accessibilityLabel={t("hide")}
           hitSlop={6}
-          onPress={ctx.guard(remove.begin)}
+          onPress={ctx.guard(hide.begin)}
           style={({ pressed }) => ({
             position: "absolute",
             right: 34,
@@ -1789,7 +1773,7 @@ function ProjectRow({
             backgroundColor: pressed ? p.pressed : "transparent",
           })}
         >
-          <Icon name="FolderX" size={14} color={p.muted} />
+          <Icon name="EyeOff" size={14} color={p.muted} />
         </Pressable>
       ) : null}
       </>

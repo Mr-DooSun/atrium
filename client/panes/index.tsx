@@ -35,7 +35,8 @@ export function registerPanes(client: PluginClientContext): () => void {
       client.openScreen({ screenId: PANES_SCREEN });
     }),
     client.addScreen({ id: PANES_SCREEN, title: panesText.message("title"), Component: PanesScreen }),
-    client.addSidebarHeaderItem({ id: "panes", title: panesText.message("open"), Component: PanesSidebarItem }),
+    // Named like its row ("Panes"), so the Show menu and the sidebar agree.
+    client.addSidebarHeaderItem({ id: "panes", title: panesText.message("title"), Component: PanesSidebarItem }),
     client.addCommandCenterItem({
       id: "panes-open",
       title: panesText.message("open"),

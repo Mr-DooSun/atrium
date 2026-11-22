@@ -5,6 +5,21 @@ import { Icon, Modal, TextInput, useToast } from "@getpaseo/plugin/client/ui";
 import { TITLE_LINE, type Palette } from "./look";
 import { sidebarText } from "./sidebar-strings";
 
+/** Longest display name the dialog takes. */
+export const MAX_NAME_LENGTH = 80;
+
+export interface RenameFallback {
+  kind: "branch" | "folder";
+  name: string;
+}
+
+/** Paseo derives an untitled workspace's name from its branch, or from its folder outside git. */
+export function renameFallback(branch: string | null, directory: string): RenameFallback {
+  if (branch) return { kind: "branch", name: branch };
+  const parts = directory.split(/[\\/]/).filter(Boolean);
+  return { kind: "folder", name: parts[parts.length - 1] ?? directory };
+}
+
 export interface RenameState {
   editing: boolean;
   pending: boolean;
@@ -18,7 +33,7 @@ export interface RenameState {
 /**
  * A workspace's display name is its Paseo title, stored by the daemon, so Paseo's own sidebar
  * and every other client show the same name. An empty name clears the title and the row falls
- * back to the folder name.
+ * back to the name Paseo derives (branch, else folder).
  */
 export function useRename(ref: WorkspaceRef | null, current: string | null): RenameState {
   const paseo = usePaseo();
@@ -90,12 +105,13 @@ export function RenameButton({ onPress, p }: { onPress(): void; p: Palette }) {
 /** Rendered beside the row, like the archive dialog, so its presses never reach the row. */
 export function RenameModal({
   state,
-  folder,
+  fallback,
   p,
 }: {
   state: RenameState;
-  /** The workspace's folder name: the placeholder, and what an empty name falls back to. */
-  folder: string;
+  /** What Paseo names the workspace without a title (its branch, else its folder): the
+   *  placeholder, and what an empty name falls back to. */
+  fallback: RenameFallback;
   p: Palette;
 }) {
   const { t } = useTranslation(sidebarText);
@@ -114,7 +130,9 @@ export function RenameModal({
           value={state.draft}
           onChangeText={state.setDraft}
           onSubmitEditing={state.save}
-          placeholder={folder}
+          // Long names push the project name out of Paseo's header; Paseo itself sets no limit.
+          maxLength={MAX_NAME_LENGTH}
+          placeholder={fallback.name}
           placeholderTextColor={p.muted}
           editable={!state.pending}
           returnKeyType="done"
@@ -129,7 +147,7 @@ export function RenameModal({
           }}
         />
         <Text style={{ color: p.muted, fontSize: 12, lineHeight: 17 }}>
-          {t("renameFallback", { folder })}
+          {t(fallback.kind === "branch" ? "renameFallbackBranch" : "renameFallbackFolder", { name: fallback.name })}
         </Text>
         <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
           <Pressable

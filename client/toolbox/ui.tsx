@@ -695,17 +695,18 @@ export function mcpScopeLabel(t: Strings, kind: ProviderKind, server: Pick<McpSe
   return scope;
 }
 
-/** Plugins carry no scope in the contract: Paseo plugins are daemon-wide and a CLI without
+/** Plugins carry no scope in the contract: a CLI without
  *  MCP scopes keeps one account-wide config; otherwise the list does not say. */
 export function pluginScopeLabel(t: Strings, ecosystem: Ecosystem, scope?: string | null): string {
-  if (ecosystem === "paseo") return t.scope.paseo;
   const s = scope?.toLowerCase() ?? null;
   if (s === "user") return t.scope.account;
   if (s === "local") return t.scope.projectOwn;
   if (s === "project") return t.scope.projectShared;
   if (s === "synced") return t.scope.synced;
   if (s) return s;
-  return MCP_SCOPES[ecosystem].length === 0 ? t.scope.account : t.scope.unknown;
+  // "paseo" is native-only and never lists plugins here; treated like a CLI without scopes.
+  const scopes = ecosystem === "paseo" ? [] : MCP_SCOPES[ecosystem];
+  return scopes.length === 0 ? t.scope.account : t.scope.unknown;
 }
 
 /** One line under the profile switcher: which project the lists are for. */

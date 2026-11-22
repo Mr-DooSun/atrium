@@ -18,11 +18,16 @@ import {
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { ensureChatDir } from "../shared/chat/rpc";
 import { chatText } from "./chat-strings";
+import { sidebarText } from "./sidebar-strings";
 import { ROW, TITLE_LINE, type Palette } from "./look";
 import { ProviderMark, StatusMark, agentBucket, isAgentTurnActive } from "./marks";
 import { ArchiveButton, ArchiveModal, useArchive, NO_EMPTIED, type ArchiveTarget } from "./archive";
 import { PanesButton, SessionMenu } from "./project-order";
 import { openInPanes } from "./panes/drop-bus";
+import { useCollapsed } from "./collapsed-store";
+
+/** The General section's key in the folded set; never a ref key. */
+const GENERAL_KEY = "atrium:general";
 
 /** Rows shown before "show more"; the list scrolls inside its own box past this. */
 const VISIBLE = 5;
@@ -52,7 +57,9 @@ export function ChatSection({
   const paseo = usePaseo();
   const toast = useToast();
   const { t } = useTranslation(chatText);
-  const [open, setOpen] = useState(true);
+  // Folded state kept across reloads with the tree's (web, Electron).
+  const [collapsed, toggleCollapsed] = useCollapsed();
+  const open = !collapsed.has(GENERAL_KEY);
   const [expanded, setExpanded] = useState(false);
   const [starting, setStarting] = useState(false);
 
@@ -108,7 +115,7 @@ export function ChatSection({
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
           accessibilityLabel={t("title")}
-          onPress={() => setOpen((v) => !v)}
+          onPress={() => toggleCollapsed(GENERAL_KEY)}
           style={({ pressed }) => ({
             flex: 1,
             flexDirection: "row",
@@ -123,7 +130,7 @@ export function ChatSection({
           <Icon name={open ? "ChevronDown" : "ChevronRight"} size={14} color={p.muted} />
           {/* The icon carries the meaning on its own, whatever the language. */}
           <Icon name="MessagesSquare" size={14} color={p.muted} />
-          <Text numberOfLines={1} style={{ flex: 1, color: p.muted, fontSize: 14 }}>
+          <Text numberOfLines={1} style={{ flex: 1, color: p.muted, fontSize: 14, textAlign: "left" }}>
             {t("title")}
             {chats.length > 0 ? ` ${chats.length}` : ""}
           </Text>
@@ -189,6 +196,7 @@ function ChatRow({
   p: Palette;
 }) {
   const { t } = useTranslation(chatText);
+  const { t: tSidebar } = useTranslation(sidebarText);
   const agent = useAgent(reference, (a) => ({
     label: a.title ?? t("untitled"),
     provider: a.provider,
@@ -233,7 +241,7 @@ function ChatRow({
       ) : null}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Open ${agent.label}`}
+        accessibilityLabel={tSidebar("openRow", { name: agent.label })}
         onPress={() => view.navigation.openAgent(reference)}
         // Desktop has the hover buttons; the menu is for touch layouts only.
         onLongPress={view.layout.compact ? () => setMenuOpen(true) : undefined}
@@ -262,6 +270,7 @@ function ChatRow({
             fontSize: 14,
             lineHeight: TITLE_LINE,
             opacity: hovered || active ? 1 : 0.76,
+            textAlign: "left",
           }}
         >
           {agent.label}

@@ -5,6 +5,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import type { TreeNode } from "./tree";
+import { hiddenProjectSchema } from "./project-rpc";
 
 const Order = z.array(z.string().min(1)).max(1000);
 /** Parent key → its children's keys in order. A project's own rows go under `rootsGroup(path)`. */
@@ -14,7 +15,7 @@ export type NodeOrders = Readonly<Record<string, readonly string[]>>;
 export const getProjectOrder = defineRpc({
   name: "project.order.get",
   input: z.object({}),
-  output: z.object({ order: Order, nodes: NodeOrders }),
+  output: z.object({ order: Order, nodes: NodeOrders, hiddenProjects: z.array(hiddenProjectSchema).default([]) }),
 });
 
 /** Sets the order of one parent's children; an empty order goes back to the default. */
