@@ -5,7 +5,7 @@ import type { PluginAgentSnapshot } from "@getpaseo/plugin";
 import { useTranslation } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { WorktreeInfo } from "../shared/project-rpc";
-import { TITLE_LINE, worktreeColor, type Bucket, type Palette, type WorktreeBadgeSpec } from "./look";
+import { ROW, TITLE_LINE, worktreeColor, type Bucket, type Palette, type WorktreeBadgeSpec } from "./look";
 import { providerMark } from "./provider-icons";
 import { sidebarText } from "./sidebar-strings";
 
@@ -194,18 +194,27 @@ export function WorktreeMark({ info, spec, p }: { info: GitWorktree; spec: Workt
   );
 }
 
-/** A thin bar on a row's left edge, in its worktree's color, so sessions of one worktree line up. */
-export function WorktreeBar({ info, p }: { info: GitWorktree; p: Palette }) {
+/**
+ * A thin bar on a row's left edge, in its worktree's color, so sessions of one worktree line up.
+ * Where the row drawn above or below is in the same checkout, the bar reaches the row's edge (and
+ * across the gap below), so a run of rows reads as one unbroken line instead of dashes.
+ */
+export function WorktreeBar({ info, lane, p }: { info: GitWorktree; lane: { joinAbove: boolean; joinBelow: boolean } | null; p: Palette }) {
+  const up = lane?.joinAbove ?? false;
+  const down = lane?.joinBelow ?? false;
   return (
     <View
       pointerEvents="none"
       style={{
         position: "absolute",
         left: 2,
-        top: 6,
-        bottom: 6,
+        top: up ? 0 : 6,
+        bottom: down ? -ROW.gap : 6,
         width: 3,
-        borderRadius: 2,
+        borderTopLeftRadius: up ? 0 : 2,
+        borderTopRightRadius: up ? 0 : 2,
+        borderBottomLeftRadius: down ? 0 : 2,
+        borderBottomRightRadius: down ? 0 : 2,
         backgroundColor: worktreeColor(p, info.worktreePath),
         opacity: 0.8,
       }}
