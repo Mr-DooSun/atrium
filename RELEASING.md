@@ -79,28 +79,91 @@ $PASEO plugin logs atrium-dev                   # Plugin ready 확인
 
 ### 격리 데몬
 
-`paseo daemon start`에는 `--port` 옵션이 없다(`--home`, `--timeout`만 있다). 포트는 격리 홈의 `config.json`에 미리 써 둔다. 웹 UI(`http://127.0.0.1:<PORT>/`)를 쓰려면 `features.webUi.enabled`를 켠다. Atrium 화면은 설정 → 사이드바 → 보기에서 Atrium을 골라야 보인다.
+관리 설치와 웹 UI 검증은 실사용 데몬(`~/.paseo`, 포트 6767)과 분리해서 진행한다. `paseo daemon start`에는 `--port` 옵션이 없으므로 수신 주소는 격리 홈의 `config.json`에 지정한다. 이 예에서는 데몬이 6791을 사용한다. `features.webUi.enabled`로 데몬의 내장 웹 UI를 켠다. 별도 정적 서버를 쓰는 경우를 위해 `daemon.cors.allowedOrigins`에는 웹 서버의 origin도 등록한다.
 
 ```bash
 PASEO=/Applications/Paseo.app/Contents/Resources/bin/paseo
-DIR=/private/tmp/<dir>; PORT=<다른 포트>
-mkdir -p $DIR
-cat > $DIR/config.json <<JSON
-{"version":1,"daemon":{"listen":"127.0.0.1:$PORT","mcp":{"injectIntoAgents":false},"relay":{"enabled":false}},"pluginsEnabled":true,"features":{"webUi":{"enabled":true}}}
+DIR=$(mktemp -d /private/tmp/atrium-uxaudit.XXXXXX)
+PORT=6791
+WEB_PORT=6792
+cat > "$DIR/config.json" <<JSON
+{
+  "version": 1,
+  "daemon": {
+    "listen": "127.0.0.1:$PORT",
+    "cors": {
+      "allowedOrigins": ["http://127.0.0.1:$WEB_PORT", "http://localhost:$WEB_PORT"]
+    },
+    "mcp": { "injectIntoAgents": false },
+    "relay": { "enabled": false }
+  },
+  "pluginsEnabled": true,
+  "features": { "webUi": { "enabled": true } }
+}
 JSON
-env -u PASEO_AGENT_ID -u PASEO_HOME $PASEO daemon start --home $DIR
+env -u PASEO_AGENT_ID -u PASEO_HOME "$PASEO" daemon start --home "$DIR"
 ```
 
-git 소스 관리 설치 확인과 정리:
+같은 터미널에서 검증할 원격 ref를 지정해 관리 설치하고 상태가 `running`인지 확인한다.
 
 ```bash
-PASEO_HOME=$DIR $PASEO plugin install git:Mr-DooSun/atrium --ref <branch> --host 127.0.0.1:$PORT </dev/null
-PASEO_HOME=$DIR $PASEO plugin ls --host 127.0.0.1:$PORT    # running 확인
-$PASEO daemon stop --home $DIR
+REF=main
+PASEO_HOME="$DIR" "$PASEO" plugin install git:Mr-DooSun/atrium --ref "$REF" --id atrium-test --host "127.0.0.1:$PORT" </dev/null
+PASEO_HOME="$DIR" "$PASEO" plugin ls --host "127.0.0.1:$PORT"
 ```
 
-- 같은 데몬에 atrium을 두 번 설치하면 사용량 소스가 겹친다. 다시 설치하기 전에 `plugin remove`로 앞선 설치를 지운다.
-- 여러 host 재현: 격리 데몬 두 개를 띄우고 `$PASEO --host 127.0.0.1:<A> host add 127.0.0.1:<B> --label <이름>`으로 A에 B를 붙인 뒤 A의 웹 UI를 연다.
+- 같은 데몬에 Atrium을 두 번 설치하면 사용량 소스가 겹친다. 다시 설치하기 전에 격리 데몬에서 `plugin remove`로 앞선 설치를 지운다.
+- 여러 호스트를 재현하려면 서로 다른 임시 홈과 포트에서 격리 데몬 두 개를 띄운다. 두 포트를 각각 `PORT_A`, `PORT_B`에 지정한 뒤 `"$PASEO" --host "127.0.0.1:$PORT_A" host add "127.0.0.1:$PORT_B" --label test-host-b`로 A에 B를 붙인 뒤 A의 웹 UI를 연다.
+- 새 비공개 브라우저 창에서 내장 웹 UI(`http://127.0.0.1:6791/`)를 연다. 설정 → 사이드바 → 보기에서 Atrium을 고른다.
+
+#### 별도 정적 웹 서버로 확인하기
+
+내장 웹 UI를 사용할 수 없으면 앱 번들의 `/Applications/Paseo.app/Contents/Resources/app-dist`를 6792에서 정적으로 제공한다. 서버는 웹 앱의 하위 경로를 새로고침해도 `index.html`을 반환하고, 페이지가 처음 연결할 데몬 주소로 `127.0.0.1:6791`을 전달한다. 웹 포트를 바꿀 때는 격리 데몬을 시작하기 전에 `daemon.cors.allowedOrigins`도 같은 origin으로 바꾼다.
+
+```bash
+cat > "$DIR/serve.mjs" <<'JS'
+import { createServer } from "node:http";
+import { readFile, stat } from "node:fs/promises";
+import { extname, resolve, sep } from "node:path";
+
+const [appDist, daemonPort, webPort] = process.argv.slice(2);
+const root = resolve(appDist);
+const index = resolve(root, "index.html");
+const types = {
+  ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+  ".json": "application/json", ".png": "image/png", ".ico": "image/x-icon",
+  ".svg": "image/svg+xml", ".ttf": "font/ttf", ".woff2": "font/woff2",
+  ".wasm": "application/wasm",
+};
+const connection = JSON.stringify({ listen: `127.0.0.1:${daemonPort}` });
+
+createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url, "http://127.0.0.1");
+    const asset = resolve(root, "." + decodeURIComponent(url.pathname));
+    const file = asset.startsWith(root + sep) && (await stat(asset).catch(() => null))?.isFile()
+      ? asset : index;
+    const body = file === index
+      ? (await readFile(index, "utf8")).replace("<head>",
+          `<head><script>globalThis.__PASEO_INITIAL_DAEMON_CONNECTION__=${connection}</script>`)
+      : await readFile(file);
+    res.writeHead(200, {
+      "Content-Type": types[extname(file)] ?? "application/octet-stream",
+      "Cache-Control": "no-store",
+    }).end(body);
+  } catch {
+    res.writeHead(500).end("Could not serve the Paseo web client");
+  }
+}).listen(Number(webPort), "127.0.0.1");
+JS
+node "$DIR/serve.mjs" /Applications/Paseo.app/Contents/Resources/app-dist "$PORT" "$WEB_PORT"
+```
+
+새 비공개 창에서 `http://127.0.0.1:6792`를 열고 연결 대상이 `127.0.0.1:6791`인지 확인한다. 검증을 마치면 정적 서버를 실행한 경우 Ctrl+C로 먼저 종료하고, 아래 명령으로 격리 데몬을 종료한다.
+
+```bash
+"$PASEO" daemon stop --home "$DIR"
+```
 
 ## 4. 머지 전 확인
 
@@ -109,7 +172,19 @@ $PASEO daemon stop --home $DIR
 - [ ] `npm test`를 `PASEO_HOME` 설정한 경우와 해제한 경우 모두 실행
 - [ ] `tests/runtime-imports.test.ts` 통과. 허용 import는 `@getpaseo/plugin*`, `react`, `react-native`, `zod`, `@tanstack/react-query`, `node:*`, 상대 경로뿐이다. `import type`도 `@getpaseo/client`를 쓰면 안 된다(0.2.0에서 관리 설치 빌드가 실패한 원인).
 - [ ] 격리 데몬에 git 소스로 관리 설치해 `running`을 확인한다. `node_modules`가 없는 실제 환경이어야 한다.
+- [ ] 3절의 웹 클라이언트에서 플러그인의 클라이언트 로드를 확인한다. 브라우저 콘솔에 플러그인 평가 오류가 없고, 사이드바 헤더에 `Panes`가 보이며, **설정 → 사이드바 → 보기**에서 `Atrium` 뷰를 선택할 수 있어야 한다. `/h/<host>/plugin/<id>/surface/mcp`, `/h/<host>/plugin/<id>/surface/plugins`도 각각 열어 본다. `<host>`와 `<id>`는 격리 데몬의 호스트 ID와 설치한 플러그인 ID로 바꾼다.
+  - 데몬마다 브라우저 저장소를 분리한다. 기존 비공개 창을 모두 닫고 새로 열거나, 이전 실행과 다른 출처로 접속한다(예: `127.0.0.1` 대신 `localhost`). 같은 주소와 포트에 이전 데몬의 호스트 항목이 남아 있으면 새 데몬에 연결되지 않아 플러그인 사이드바 항목이 보이지 않는다.
+  - 데몬에서 `running`이어도 클라이언트 진입점은 평가 중 실패할 수 있다. 기여 ID는 앱의 `/^[a-z][a-z0-9-]*$/` 규칙을 따른다. 점이 들어간 `atrium.worktree` 때문에 사이드바·패널·툴박스가 모두 로드되지 않은 사례가 있다.
 - [ ] 개인정보 검사: 이메일, 토큰, 절대 경로, 실명이 코드·문서·스크린샷·커밋 작성자에 없는지 확인한다.
+
+푸시 전에도 로컬 bare clone으로 관리 설치를 확인할 수 있다. 검증할 변경을 커밋한 브랜치의 워크트리에서, 3절의 원격 설치 명령 대신 아래 명령을 실행한다.
+
+```bash
+REF=$(git branch --show-current)
+BARE_DIR=$(mktemp -d /private/tmp/atrium-bare.XXXXXX)
+git clone --bare --branch "$REF" . "$BARE_DIR/atrium.git"
+PASEO_HOME="$DIR" "$PASEO" plugin install "git:file://$BARE_DIR/atrium.git" --ref "$REF" --id atrium-test --host "127.0.0.1:$PORT" </dev/null
+```
 
 ## 5. 문서
 
