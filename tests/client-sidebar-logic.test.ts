@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { describe, test } from "node:test";
 import { hiddenProjectKey } from "../shared/project-rpc.ts";
-import { hiddenKeySet, isHiddenProject, keepHiddenSlots, orderKeyHost, reorderSection, sectionSaved, visibleProjectBlocks } from "../client/sidebar-visibility.ts";
-import { move, placeAt, projectOrderKey } from "../shared/project-order.ts";
-import { createReact, loadClient, plain } from "./helpers/client-sandbox.ts";
+import { displayedOrder, hiddenKeySet, isHiddenProject, keepHiddenSlots, orderKeyHost, reorderSection, sectionSaved, visibleProjectBlocks } from "../client/sidebar-visibility.ts";
+import { applyOrder, move, placeAt, projectOrderKey } from "../shared/project-order.ts";
+import { createReact, loadClient, plain, textOf } from "./helpers/client-sandbox.ts";
 
 type Any = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 import * as naming from "../client/workspace-naming.ts";
@@ -284,5 +284,139 @@ describe("the other-host hide notices are gone", () => {
     const { sidebarText } = await import("../client/sidebar-strings.ts");
     const keys = ["hide", "hideTitle", "hideBody", "hideConfirm", "hiding", "hideFailed", "unhide", "unhideFailed", "hiddenProjects", "hiddenMissing", "orderFailed"];
     for (const key of keys) assert.ok((sidebarText.message as Any)(key, { n: 1, id: "x", name: "x" }), key);
+  });
+});
+
+describe("displayedOrder: reordering starts from what the sidebar shows", () => {
+  test("keys the saved order does not name come first, in their default order; the saved order follows intact", () => {
+    assert.deepEqual(displayedOrder(["n1", "a", "n2", "b"], ["b", "a"]), ["n1", "n2", "b", "a"]);
+    assert.deepEqual(displayedOrder(["a", "b"], []), ["a", "b"], "nothing saved: the default order");
+    assert.deepEqual(displayedOrder([], ["b", "a"]), ["b", "a"]);
+  });
+  test("saved keys no project has now (an offline host's) keep their place", () => {
+    assert.deepEqual(displayedOrder(["n", "a"], ["off1", "a", "off2"]), ["n", "off1", "a", "off2"]);
+  });
+  test("no duplicates, whichever list repeats a key", () => {
+    assert.deepEqual(displayedOrder(["a", "a", "n", "n"], ["a", "a", "b"]), ["n", "a", "b"]);
+    const out = displayedOrder(["x", "y", "x"], ["y", "z", "z"]);
+    assert.equal(new Set(out).size, out.length);
+  });
+  test("it is exactly what applyOrder shows for the same inputs", () => {
+    const keys = ["n1", "a", "n2", "b"];
+    const saved = ["b", "off", "a"];
+    assert.deepEqual(applyOrder(keys, saved, (k) => k), displayedOrder(keys, saved).filter((k) => keys.includes(k)));
+  });
+});
+
+describe("hide, reorder the rest, unhide: the hidden project keeps its place (uxtester's scenario)", () => {
+  const key = (host: string, root: string) => projectOrderKey(host, root);
+  const [b2, b1, b3] = [key("B", "/b-two"), key("B", "/b-one"), key("B", "/b-three")];
+  const [a1, a2] = [key("A", "/a-one"), key("A", "/a-two")];
+  // The sidebar's default order of the section: b-two, b-one, b-three.
+  const defaultKeys = [a1, b2, b1, b3, a2];
+
+  /** What the sidebar does: displayedOrder -> move or placeAt among the shown -> reorderSection. */
+  function reorder(saved: string[], hidden: Set<string>, how: "buttons" | "drag") {
+    const base = displayedOrder(defaultKeys, saved);
+    const shownB = applyOrder(defaultKeys.filter((k) => orderKeyHost(k) === "B" && !hidden.has(k)), saved, (k) => k);
+    assert.deepEqual(shownB, [b2, b3], "b-one is hidden, the other two show in default order");
+    const next = how === "buttons"
+      ? move(shownB, sectionSaved(base, "B"), b3, -1)
+      : placeAt(shownB, sectionSaved(base, "B"), b3, 0);
+    return reorderSection(base, next, "B", hidden);
+  }
+  const sectionB = (order: string[]) => applyOrder(defaultKeys.filter((k) => orderKeyHost(k) === "B"), order, (k) => k);
+
+  const cases: [string, string[]][] = [
+    ["nothing saved", []],
+    ["only the other host's keys saved", [a1, a2]],
+    ["everything saved", [a1, b2, b1, b3, a2]],
+    ["everything saved, other host's keys elsewhere", [b2, a2, b1, a1, b3]],
+  ];
+  for (const [name, saved] of cases) {
+    for (const how of ["buttons", "drag"] as const) {
+      test(`${name} (${how}): after unhide the order is b-three, b-one, b-two`, () => {
+        const next = reorder(saved, new Set([b1]), how);
+        assert.deepEqual(sectionB(next), [b3, b1, b2]);
+      });
+    }
+  }
+
+  test("the repro before the fix: starting from the unsaved order alone loses the hidden slot", () => {
+    const wrong = reorderSection([], [b3, b2], "B", new Set([b1]));
+    assert.deepEqual(sectionB(wrong), [b1, b3, b2], "b-one comes back first, as a new project would");
+  });
+
+  test("a project hidden in the middle of three stays in the middle through several reorders", () => {
+    let saved: string[] = [];
+    const hidden = new Set([b1]);
+    saved = reorder(saved, hidden, "buttons");
+    const shownB = applyOrder([b2, b3], saved, (k) => k);
+    const base = displayedOrder(defaultKeys, saved);
+    saved = reorderSection(base, move(shownB, sectionSaved(base, "B"), shownB[1], -1), "B", hidden);
+    assert.deepEqual(sectionB(saved), [b2, b1, b3], "swapped back; b-one never moved");
+  });
+});
+
+describe("reordering one host leaves the others' keys in place, saved or not", () => {
+  const key = (host: string, root: string) => projectOrderKey(host, root);
+  const [a1, a2, b1, b2, c1] = [key("A", "/a1"), key("A", "/a2"), key("B", "/b1"), key("B", "/b2"), key("C", "/c1")];
+  const sectionKeysA = (list: string[]) => list.filter((k) => orderKeyHost(k) === "A");
+
+  test("A reordered: B's and C's keys are where displayedOrder put them, saved or not", () => {
+    // C is an offline host: its project is not in the current list but is saved; B is unsaved.
+    const keys = [a1, a2, b1, b2];
+    const saved = [c1, a1, a2];
+    const base = displayedOrder(keys, saved);
+    assert.deepEqual(base, [b1, b2, c1, a1, a2]);
+    const next = move([a1, a2], sectionSaved(base, "A"), a2, -1);
+    const out = reorderSection(base, next, "A", new Set());
+    assert.deepEqual(out, [b1, b2, c1, a2, a1]);
+    assert.deepEqual(out.filter((k) => orderKeyHost(k) !== "A"), base.filter((k) => orderKeyHost(k) !== "A"));
+    assert.deepEqual(sectionKeysA(out), [a2, a1]);
+  });
+
+  test("the same when the other host's keys are unsaved offline-host keys only", () => {
+    const base = displayedOrder([a1, a2], [c1]);
+    const out = reorderSection(base, [a2, a1], "A", new Set());
+    assert.deepEqual(out.filter((k) => k === c1), [c1]);
+    assert.equal(out.indexOf(c1), base.indexOf(c1));
+    assert.deepEqual(sectionKeysA(out), [a2, a1]);
+  });
+
+  test("another host's hidden key keeps its slot too", () => {
+    const hb = key("B", "/hidden");
+    const base = displayedOrder([a1, hb, a2, b1], [a1, hb, a2, b1]);
+    const out = reorderSection(base, [a2, a1], "A", new Set([hb]));
+    assert.deepEqual(out, [a2, hb, a1, b1]);
+  });
+});
+
+describe("OtherHostNotice (another host's chat, named as the sidebar names it)", () => {
+  function notice(hostId: string, hosts: { serverId: string; label: string }[]) {
+    const { react, mount } = createReact();
+    const mod = loadClient<Any>("client/panes/pane.tsx", ["OtherHostNotice"], {
+      react,
+      modules: {
+        "@getpaseo/plugin/client": {
+          useHosts: () => hosts,
+          useTranslation: () => ({ t: (key: string, params?: object) => `${key}:${JSON.stringify(params ?? {})}` }),
+        },
+        "@getpaseo/plugin/client/ui": { Icon: "Icon" },
+      },
+    });
+    return textOf(mount(() => mod.OtherHostNotice({ hostId, p: { muted: "x" } }), undefined).tree());
+  }
+  const hosts = [{ serverId: "srv_a", label: "Laptop" }, { serverId: "srv_b", label: "" }];
+
+  test("a known host shows its label", () => {
+    assert.equal(notice("srv_a", hosts), 'otherHost:{"host":"Laptop"}');
+  });
+  test("an unknown host shows its id", () => {
+    assert.equal(notice("srv_z", hosts), 'otherHost:{"host":"srv_z"}');
+    assert.equal(notice("srv_z", []), 'otherHost:{"host":"srv_z"}');
+  });
+  test("a host with an empty label shows its id", () => {
+    assert.equal(notice("srv_b", hosts), 'otherHost:{"host":"srv_b"}');
   });
 });
