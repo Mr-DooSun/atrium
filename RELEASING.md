@@ -172,7 +172,18 @@ node "$DIR/serve.mjs" /Applications/Paseo.app/Contents/Resources/app-dist "$PORT
 - [ ] `npm test`를 `PASEO_HOME` 설정한 경우와 해제한 경우 모두 실행
 - [ ] `tests/runtime-imports.test.ts` 통과. 허용 import는 `@getpaseo/plugin*`, `react`, `react-native`, `zod`, `@tanstack/react-query`, `node:*`, 상대 경로뿐이다. `import type`도 `@getpaseo/client`를 쓰면 안 된다(0.2.0에서 관리 설치 빌드가 실패한 원인).
 - [ ] 격리 데몬에 git 소스로 관리 설치해 `running`을 확인한다. `node_modules`가 없는 실제 환경이어야 한다.
+- [ ] 3절의 웹 클라이언트에서 플러그인의 클라이언트 로드를 확인한다. 브라우저 콘솔에 플러그인 평가 오류가 없고, 사이드바 헤더에 `Panes`가 보이며, **설정 → 사이드바 → 보기**에서 `Atrium` 뷰를 선택할 수 있어야 한다. `/h/<host>/plugin/<id>/surface/mcp`, `/h/<host>/plugin/<id>/surface/plugins`도 각각 열어 본다. `<host>`와 `<id>`는 격리 데몬의 호스트 ID와 설치한 플러그인 ID로 바꾼다.
+  - 데몬에서 `running`이어도 클라이언트 진입점은 평가 중 실패할 수 있다. 기여 ID는 앱의 `/^[a-z][a-z0-9-]*$/` 규칙을 따른다. 점이 들어간 `atrium.worktree` 때문에 사이드바·패널·툴박스가 모두 로드되지 않은 사례가 있다.
 - [ ] 개인정보 검사: 이메일, 토큰, 절대 경로, 실명이 코드·문서·스크린샷·커밋 작성자에 없는지 확인한다.
+
+푸시 전에도 로컬 bare clone으로 관리 설치를 확인할 수 있다. 검증할 변경을 커밋한 브랜치의 워크트리에서, 3절의 원격 설치 명령 대신 아래 명령을 실행한다.
+
+```bash
+REF=$(git branch --show-current)
+BARE_DIR=$(mktemp -d /private/tmp/atrium-bare.XXXXXX)
+git clone --bare --branch "$REF" . "$BARE_DIR/atrium.git"
+PASEO_HOME="$DIR" "$PASEO" plugin install "git:file://$BARE_DIR/atrium.git" --ref "$REF" --id atrium-test --host "127.0.0.1:$PORT" </dev/null
+```
 
 ## 5. 문서
 
