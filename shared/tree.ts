@@ -209,13 +209,19 @@ export interface Lane {
   readonly joinAbove: boolean;
   /** The bar runs on into the row below: same checkout there. */
   readonly joinBelow: boolean;
+  /**
+   * First row of a run of two or more: the run's branch goes on a header line drawn above it, and
+   * no row in the run repeats it. A lone row (no join either way) keeps its own badge.
+   */
+  readonly runStart: boolean;
 }
 
 /**
  * Walks a project's rows in the order they are drawn (children under their parent, nothing under a
  * collapsed row) and tells each row how its checkout relates to the rows drawn right above and below
- * it. Consecutive rows in one checkout form a run: one bar from top to bottom, the badge on its first
- * row. Runs only follow what is on screen, so a row after a parent's last child continues that child.
+ * it. Consecutive rows in one checkout form a run: one bar from top to bottom under a header line
+ * naming the branch. Runs only follow what is on screen, so a row after a parent's last child
+ * continues that child.
  */
 export function checkoutLanes(
   roots: readonly TreeNode[],
@@ -236,10 +242,9 @@ export function checkoutLanes(
     const own = keys[i];
     const above = i > 0 ? keys[i - 1] : null;
     const below = i < order.length - 1 ? keys[i + 1] : null;
-    lanes.set(key, {
-      joinAbove: own !== null && own === above,
-      joinBelow: own !== null && own === below,
-    });
+    const joinAbove = own !== null && own === above;
+    const joinBelow = own !== null && own === below;
+    lanes.set(key, { joinAbove, joinBelow, runStart: joinBelow && !joinAbove });
   });
   return lanes;
 }

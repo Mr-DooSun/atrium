@@ -187,33 +187,22 @@ export function WorktreeBadge({ info, spec, p }: { info: GitWorktree; spec: Work
 }
 
 /**
- * The badge cut to its icon, on the title line (after the title) of a row whose row above shows the full badge for the
- * same checkout. "No badge" keeps meaning the default branch of the main checkout; this mark says
- * "same as above". Screen readers get the full badge text.
- */
-export function WorktreeMark({ info, spec, p }: { info: GitWorktree; spec: WorktreeBadgeSpec; p: Palette }) {
-  const { t } = useTranslation(sidebarText);
-  const linked = spec.tone === "linked";
-  const color = linked ? worktreeColor(p, info.worktreePath) : p.muted;
-  const branch = spec.detached ? t("worktreeDetached", { head: spec.label }) : spec.label;
-  const label = spec.folder ? t("worktreeLinked", { folder: spec.folder, branch }) : t("worktreeMain", { branch });
-  return (
-    <View
-      accessible
-      accessibilityLabel={`${label}. ${t("worktreePath", { path: info.worktreePath })}`}
-      style={{ height: TITLE_LINE, justifyContent: "center", flexShrink: 0 }}
-    >
-      <Icon name={linked ? "FolderGit2" : "GitBranch"} size={12} color={color} />
-    </View>
-  );
-}
-
-/**
- * A thin bar on a row's left edge, in its worktree's color, so sessions of one worktree line up.
+ * A thin bar on a row's left edge, in its worktree's color, so sessions of one worktree line up
+ * (grey for the main checkout, drawn only in a run there).
  * Where the row drawn above or below is in the same checkout, the bar reaches the row's edge (and
  * across the gap below), so a run of rows reads as one unbroken line instead of dashes.
  */
-export function WorktreeBar({ info, lane, p }: { info: GitWorktree; lane: { joinAbove: boolean; joinBelow: boolean } | null; p: Palette }) {
+export function WorktreeBar({
+  info,
+  spec,
+  lane,
+  p,
+}: {
+  info: GitWorktree;
+  spec: WorktreeBadgeSpec;
+  lane: { joinAbove: boolean; joinBelow: boolean } | null;
+  p: Palette;
+}) {
   const up = lane?.joinAbove ?? false;
   const down = lane?.joinBelow ?? false;
   return (
@@ -229,7 +218,8 @@ export function WorktreeBar({ info, lane, p }: { info: GitWorktree; lane: { join
         borderTopRightRadius: up ? 0 : 2,
         borderBottomLeftRadius: down ? 0 : 2,
         borderBottomRightRadius: down ? 0 : 2,
-        backgroundColor: worktreeColor(p, info.worktreePath),
+        // A linked worktree in its own color; the main checkout off its default branch in grey.
+        backgroundColor: spec.tone === "linked" ? worktreeColor(p, info.worktreePath) : p.muted,
         opacity: 0.8,
       }}
     />

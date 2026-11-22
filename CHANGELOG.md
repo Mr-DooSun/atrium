@@ -7,6 +7,10 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+### Changed
+
+- Two or more consecutive rows in one checkout are grouped under a header line that names their branch (and worktree folder) once, lined up with their titles and joined to the color bar. Rows in the group no longer repeat the badge or the small worktree icon, and nothing is indented further: the header takes the place of the badge line the group's first row used to have. A lone row keeps its own badge, and the main checkout off its default branch gets a grey bar in a group.
+
 ## [0.6.0] - 2026-11-23
 
 ### Added

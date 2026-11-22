@@ -51,6 +51,15 @@ test("a collapsed row hides its children, so the next row joins it directly", ()
   assert.equal(lanes.server, "^-");
 });
 
+test("a run of two or more starts at its first row; a lone row starts nothing", () => {
+  const lanes = checkoutLanes([team("")], new Set(), (key) => feat("")[key] ?? null);
+  assert.equal(lanes.get("auditor")?.runStart, true);
+  assert.equal(lanes.get("client")?.runStart, false);
+  // server is alone between tester (main) and the end: it keeps its own badge.
+  assert.equal(lanes.get("server")?.runStart, false);
+  assert.equal(lanes.get("orch")?.runStart, false);
+});
+
 test("different checkouts side by side never join", () => {
   const roots = [agent("a"), agent("b"), agent("c")];
   assert.deepEqual(joins(roots, { a: "x", b: "y", c: "y" }), { a: "--", b: "-v", c: "^-" });
