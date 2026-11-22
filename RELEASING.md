@@ -173,6 +173,7 @@ node "$DIR/serve.mjs" /Applications/Paseo.app/Contents/Resources/app-dist "$PORT
 - [ ] `tests/runtime-imports.test.ts` 통과. 허용 import는 `@getpaseo/plugin*`, `react`, `react-native`, `zod`, `@tanstack/react-query`, `node:*`, 상대 경로뿐이다. `import type`도 `@getpaseo/client`를 쓰면 안 된다(0.2.0에서 관리 설치 빌드가 실패한 원인).
 - [ ] 격리 데몬에 git 소스로 관리 설치해 `running`을 확인한다. `node_modules`가 없는 실제 환경이어야 한다.
 - [ ] 3절의 웹 클라이언트에서 플러그인의 클라이언트 로드를 확인한다. 브라우저 콘솔에 플러그인 평가 오류가 없고, 사이드바 헤더에 `Panes`가 보이며, **설정 → 사이드바 → 보기**에서 `Atrium` 뷰를 선택할 수 있어야 한다. `/h/<host>/plugin/<id>/surface/mcp`, `/h/<host>/plugin/<id>/surface/plugins`도 각각 열어 본다. `<host>`와 `<id>`는 격리 데몬의 호스트 ID와 설치한 플러그인 ID로 바꾼다.
+  - 데몬마다 브라우저 저장소를 분리한다. 기존 비공개 창을 모두 닫고 새로 열거나, 이전 실행과 다른 출처로 접속한다(예: `127.0.0.1` 대신 `localhost`). 같은 주소와 포트에 이전 데몬의 호스트 항목이 남아 있으면 새 데몬에 연결되지 않아 플러그인 사이드바 항목이 보이지 않는다.
   - 데몬에서 `running`이어도 클라이언트 진입점은 평가 중 실패할 수 있다. 기여 ID는 앱의 `/^[a-z][a-z0-9-]*$/` 규칙을 따른다. 점이 들어간 `atrium.worktree` 때문에 사이드바·패널·툴박스가 모두 로드되지 않은 사례가 있다.
 - [ ] 개인정보 검사: 이메일, 토큰, 절대 경로, 실명이 코드·문서·스크린샷·커밋 작성자에 없는지 확인한다.
 
