@@ -10,7 +10,7 @@ features or behavior changes go in a minor release (0.2.0).
 ### Added
 
 - A listing image of the usage cards for additional accounts (`assets/listing-05-usage.jpg`), made from sample data.
-- "Hide from sidebar" replaces "Remove from sidebar": a hidden project leaves only the Atrium sidebar, and a "Hidden projects" entry at the bottom shows it again. Reordering keeps hidden projects' places.
+- "Hide from sidebar" replaces "Remove from sidebar": the daemon saves visibility by host and project alongside sidebar order, and "Hidden projects" at the bottom shows a project again. Paseo projects, workspaces, sessions and files stay intact.
 - Paseo's own sidebar can show Atrium's worktree badge too (Show menu > Worktree (Atrium)).
 - Panes show who sent an instruction to a sub-agent ("From <name>"), the project and workspace under the pane title, and a banner with "Answer in Paseo" while the agent waits for permission.
 
@@ -34,7 +34,6 @@ features or behavior changes go in a minor release (0.2.0).
 - Pane move arrows are disabled when the family can't move; a workspace with no agent says why it can't open in panes.
 - Additional usage cards retain full profile names in account labels and error attribution, show a Profile detail, and use distinct “Claude profiles” / “Codex profiles” source headings so they follow each provider's default card in native default order. Usage failures give concise login or retry steps. Server usage APIs expose no client locale, so these messages use English; per-account card titles and status-based ordering remain controlled by Paseo, and saved user order takes precedence.
 - Paseo plugin management now belongs to the target host's native Settings > Plugins. Toolbox no longer fetches its registry or runs Paseo plugin discovery, installation, updates or lifecycle commands; Claude, Codex and Antigravity management retains its profile, validation and preview behavior.
-- Removing a project from Atrium now only hides it in the sidebar. Host-scoped hide/unhide state persists alongside project order and is shared by clients; Paseo projects, workspaces, sessions and files stay intact. The legacy project.remove RPC is a safe hide alias, and every visibility change verifies the target host before writing.
 - Panes retain the sender name and instruction body of `agent_message` timeline entries.
 - Pane message sends can use the guarded `chat.send` RPC, which rejects archived sessions, missing workspace or project placement, and another host's sessions with typed errors. Sends retain steer behavior; attachment and interrupt requests return explicit errors instead of dropping data or interrupting a turn.
 - Usage reports include quota window lengths and original observation times, including cached Claude readings and Codex logs past reset, on Paseo 0.17.1 while retaining 0.16.1 support. Default and extra logins with the same known quota identity, and profile path aliases, no longer produce duplicate cards. Unknown identities remain separate rather than merging by email; Codex logins without a user claim stay separate even when they share a team account ID.
