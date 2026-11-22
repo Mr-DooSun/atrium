@@ -59,7 +59,7 @@ export const loginMcp = defineRpc({
 
 const pluginScope = {
   ecosystem: Ecosystem,
-  /** Required for claude/codex/antigravity; null for paseo. */
+  /** Required for managed ecosystems. Paseo is native-only and its RPC requests are refused. */
   profileId: z.string().nullable(),
   /** The agent's project directory, for project/local-scoped plugins. */
   cwd: z.string().nullable(),
@@ -129,7 +129,7 @@ export const previewSourceInstall = defineRpc({
   output: ActionPreview,
 });
 
-/** Installs from a direct source. Paseo requires an unexpired preview of the identical input. */
+/** Installs from a direct source for a managed provider profile. */
 export const runSourceInstall = defineRpc({
   name: "toolbox.plugins.install-source",
   input: sourceInstallInput,

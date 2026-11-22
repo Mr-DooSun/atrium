@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { getProjectOrder, setNodeOrder, setProjectOrder } from "../shared/project-order";
+import { hiddenProjectKey, hiddenProjectSchema, type HiddenProject } from "../shared/project-rpc";
 
 /** Beside the daemon's own data, so a second daemon home keeps its own order. */
 const HOME_DIR = process.env.PASEO_HOME ?? join(homedir(), ".paseo");
@@ -12,6 +13,7 @@ const LEGACY_FILE = join(HOME_DIR, "nested-agents", "project-order.json");
 interface Stored {
   order: string[];
   nodes: Record<string, string[]>;
+  hiddenProjects: HiddenProject[];
 }
 
 const strings = (value: unknown): string[] =>
@@ -51,7 +53,7 @@ async function read(): Promise<Stored> {
   });
   await migration;
   try {
-    const value = JSON.parse(await readFile(FILE, "utf8")) as { order?: unknown; nodes?: unknown };
+    const value = JSON.parse(await readFile(FILE, "utf8")) as { order?: unknown; nodes?: unknown; hiddenProjects?: unknown };
     const nodes: Record<string, string[]> = {};
     if (value.nodes && typeof value.nodes === "object") {
       for (const [group, list] of Object.entries(value.nodes)) {
@@ -59,10 +61,15 @@ async function read(): Promise<Stored> {
         if (keys.length > 0) nodes[group] = keys;
       }
     }
-    return { order: strings(value.order), nodes };
+    const hidden = new Map<string, HiddenProject>();
+    for (const entry of Array.isArray(value.hiddenProjects) ? value.hiddenProjects : []) {
+      const parsed = hiddenProjectSchema.safeParse(entry);
+      if (parsed.success) hidden.set(hiddenProjectKey(parsed.data.hostId, parsed.data.projectId), parsed.data);
+    }
+    return { order: strings(value.order), nodes, hiddenProjects: [...hidden.values()] };
   } catch {
     // No file yet, or a broken one: the default order.
-    return { order: [], nodes: {} };
+    return { order: [], nodes: {}, hiddenProjects: [] };
   }
 }
 
@@ -86,6 +93,16 @@ function update(change: (stored: Stored) => void): Promise<Stored> {
   });
   queue = next.catch(() => {});
   return next;
+}
+
+/** Stores any project's host namespace in this daemon's view preferences, using the order write queue. */
+export async function setProjectHidden(hostId: string, projectId: string, hidden: boolean): Promise<HiddenProject[]> {
+  const key = hiddenProjectKey(hostId, projectId);
+  const stored = await update((stored) => {
+    stored.hiddenProjects = stored.hiddenProjects.filter((entry) => hiddenProjectKey(entry.hostId, entry.projectId) !== key);
+    if (hidden) stored.hiddenProjects.push({ hostId, projectId });
+  });
+  return stored.hiddenProjects;
 }
 
 export function registerProjectOrder(server: PluginServerContext) {

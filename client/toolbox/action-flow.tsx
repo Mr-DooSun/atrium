@@ -8,7 +8,6 @@ import { useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { usePaseo } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import type { ActionPreview, CommandResult } from "../../shared/toolbox/types";
-import { PASEO_PLUGIN_TRUST_WARNING } from "../../shared/toolbox/warnings";
 import { trackReducer, type ActivityKind, type TrackEvent, type TrackState } from "./store-logic";
 import { useToolboxText } from "./strings";
 import { Button, CodeBlock, LoadingLine, Notice, ProviderGlyph, TargetPicker, errorText, useLook } from "./ui";
@@ -21,6 +20,8 @@ interface ActionBase {
   /** Installs or adds code that will run on this machine. Shows the unsandboxed warning. */
   bringsCode?: boolean;
   localWarnings?: readonly string[];
+  /** What the action will write, as entered (secret values already left out), shown before it runs. */
+  details?: readonly { label: string; value: string }[];
   /** Query key prefixes refetched after the action ran, ok or not. */
   invalidate: readonly QueryKey[];
   /** Values never shown on screen (env and header values), masked in every profile's output. */
@@ -43,12 +44,12 @@ export interface Activity {
   dismiss(): void;
 }
 
-/** One action on one profile (or on Paseo). */
+/** One action on one profile. */
 export interface ToolboxAction extends ActionBase {
   /** Preview RPC. Null: no preview contract, so the modal confirms with `localWarnings`. */
   preview: (() => Promise<ActionPreview>) | null;
   run(): Promise<CommandResult>;
-  /** Provider id whose idle sessions may reload; null for Paseo plugins. */
+  /** Provider id whose idle sessions may reload; null when nothing needs a reload. */
   reloadProvider: string | null;
   onResult?(result: CommandResult): void;
 }
@@ -118,7 +119,7 @@ function fromSingle(action: ToolboxAction): Flow {
     ...base,
     single: true,
     pick: false,
-    targets: [{ id: reloadProvider ?? "paseo", label: "", selectable: true, preselected: true, preview, run, reloadProvider }],
+    targets: [{ id: reloadProvider ?? "single", label: "", selectable: true, preselected: true, preview, run, reloadProvider }],
     onResults: onResult ? (results) => results[0] && onResult(results[0].result) : undefined,
   };
 }
@@ -399,22 +400,31 @@ function ConfirmBody({
   const running = done !== null;
   const toRun = items.filter(runnable);
   const localWarnings = action.localWarnings ?? [];
-  const hasPaseoTrustWarning = items.some(({ preview }) => preview?.warnings.includes(PASEO_PLUGIN_TRUST_WARNING));
-  const sharedWarnings = action.single ? [...(items[0]?.preview?.warnings ?? []), ...localWarnings] : localWarnings;
+  // A preview the server refused (bad input, nothing it could pin) comes back unsupported with the
+  // reason as its only warning: that is a preview failure, not "this profile can't do it".
+  const refusedOf = (preview: ActionPreview | null) =>
+    preview && !preview.supported && preview.command.length === 0 && preview.warnings.length > 0 ? preview.warnings : null;
+  const firstPreview = items[0]?.preview ?? null;
+  const sharedWarnings = action.single && !refusedOf(firstPreview) ? [...(firstPreview?.warnings ?? []), ...localWarnings] : localWarnings;
 
   const plan = (item: Planned) => {
     const { preview } = item;
+    const refused = refusedOf(preview);
     return (
       <>
         {item.error ? <Notice tone="danger" text={`${t.flow.previewFailed}: ${t.diagnostic(mask(item.error, secrets))}`} /> : null}
-        {!item.error ? (
-          <Field label={t.flow.command}>
-            {preview && preview.command.length > 0 ? (
+        {refused ? (
+          <Notice tone="danger" text={`${t.flow.previewFailed}: ${refused.map((w) => t.diagnostic(mask(w, secrets))).join(" ")}`} />
+        ) : null}
+        {!item.error && !refused ? (
+          preview && preview.command.length > 0 ? (
+            <Field label={t.flow.command}>
               <CommandView command={preview.command} relativeHome={preview.relativeHome} secrets={secrets} />
-            ) : (
-              <Text style={{ color: p.muted, fontSize: 13 }}>{t.flow.commandUnknown}</Text>
-            )}
-          </Field>
+            </Field>
+          ) : (
+            // No "Command to run" heading over no command: say plainly where it will show.
+            <Text style={{ color: p.muted, fontSize: 13 }}>{t.flow.commandUnknown}</Text>
+          )
         ) : null}
         {preview?.source ? (
           <Field label={t.flow.source}>
@@ -423,14 +433,14 @@ function ConfirmBody({
             </Text>
           </Field>
         ) : null}
-        {!action.single && preview && preview.warnings.length > 0 ? (
+        {!action.single && !refused && preview && preview.warnings.length > 0 ? (
           <View style={{ gap: 6 }}>
             {preview.warnings.map((w, i) => (
               <Notice key={i} tone="warning" text={t.diagnostic(mask(w, secrets))} />
             ))}
           </View>
         ) : null}
-        {preview && !preview.supported ? <Notice tone="danger" text={t.flow.unsupported} /> : null}
+        {preview && !preview.supported && !refused ? <Notice tone="danger" text={t.flow.unsupported} /> : null}
       </>
     );
   };
@@ -445,6 +455,13 @@ function ConfirmBody({
 
   return (
     <>
+      {action.details?.map((d, i) => (
+        <Field key={`detail-${i}`} label={d.label}>
+          <Text selectable style={{ color: p.foreground, fontSize: 13 }}>
+            {mask(d.value, secrets)}
+          </Text>
+        </Field>
+      ))}
       {action.single ? (
         items[0] ? plan(items[0]) : null
       ) : (
@@ -473,7 +490,7 @@ function ConfirmBody({
         </Field>
       ) : null}
       {!action.single && toRun.length > 1 ? <Text style={{ color: p.muted, fontSize: 12 }}>{t.flow.sequential}</Text> : null}
-      {action.bringsCode && !hasPaseoTrustWarning ? <Notice tone="warning" text={t.flow.unsandboxed} /> : null}
+      {action.bringsCode ? <Notice tone="warning" text={t.flow.unsandboxed} /> : null}
       <Footer>
         {running ? (
           <Button label={t.flow.background} onPress={onClose} />
@@ -511,11 +528,9 @@ function ResultBody({
   const okCount = results.filter((r) => r.result.ok).length;
   // Every touched profile that asks for a reload, once each.
   const reloads = new Map<string, string>();
-  let paseoReload = false;
   for (const { target, result } of results) {
     if (!result.needsReload) continue;
     if (target.reloadProvider) reloads.set(target.reloadProvider, target.label);
-    else paseoReload = true;
   }
 
   const one = ({ result }: TargetResult) => {
@@ -582,7 +597,6 @@ function ResultBody({
           <ReloadIdle provider={provider} hostId={hostId} label={action.single ? null : label} />
         </Fragment>
       ))}
-      {paseoReload ? <Notice tone="warning" text={t.flow.reloadNeededPaseo} /> : null}
       <Footer>
         <Button label={t.common.close} onPress={onClose} />
       </Footer>

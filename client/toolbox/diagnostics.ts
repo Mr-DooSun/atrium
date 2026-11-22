@@ -1,5 +1,5 @@
 import type { useTranslation } from "@getpaseo/plugin/client";
-import { PASEO_PLUGIN_TRUST_WARNING } from "../../shared/toolbox/warnings";
+import { PASEO_NATIVE_GALLERY_NOTICE } from "../../shared/toolbox/warnings";
 import type en from "./locales/en";
 
 type Translate = ReturnType<typeof useTranslation<typeof en>>["t"];
@@ -11,7 +11,6 @@ type StaticKey = { [K in keyof Diagnostic]: Diagnostic[K] extends `${string}{{${
 const exact = {
   "agy documents no plugin update command": "agyUpdate",
   "mcpServers is not an object": "invalidMcpServers",
-  "Changing the Paseo marketplace is not supported by this CLI": "unsupportedMarketplace",
   "This marketplace source or name is not supported by this CLI": "invalidMarketplace",
   "프로젝트 디렉터리를 선택하거나 user 범위를 지정하세요.": "projectRequired",
   "project scope needs a workspace directory": "projectRequired",
@@ -33,22 +32,12 @@ const exact = {
   "Antigravity supports Streamable HTTP only; legacy SSE is not supported": "agyTransport",
   "Choose a Codex plugin and its marketplace.": "choosePlugin",
   "invalid plugin id": "choosePlugin",
-  "Choose a plugin from the official Paseo registry.": "officialPlugin",
-  "Choose an installed Paseo plugin.": "installedPlugin",
-  "This Paseo plugin target is not supported by this CLI": "installedPlugin",
-  "Paseo plugin is no longer installed.": "installedPlugin",
-  "Paseo registry entry has no supported immutable install target.": "pinnedTarget",
-  "Paseo returned an update target that cannot be pinned.": "pinnedTarget",
-  "Paseo reports no update available.": "noUpdate",
-  "Open a new preview and confirm its pinned revision before proceeding.": "newPreview",
-  "The installed plugin changed. Open a new update preview.": "newPreview",
-  "This Paseo CLI requires interactive review for registry installations. Run the displayed command in a terminal and confirm the revision shown there.": "manualInstall",
   "env values and headers are stored in plain text in the config file.": "plainSecrets",
   "Stdio environment values are passed as process arguments and can be visible to other local processes while Codex runs.": "processSecrets",
   "agy has no `mcp add` command in its docs; this edits the documented config file directly.": "agyFile",
   "Marketplace installs need an active agy sign-in. Plugins with required variables install disabled.": "agyLoginNeeded",
   "Installs third-party code from a GitHub repository.": "thirdParty",
-  [PASEO_PLUGIN_TRUST_WARNING]: "paseoTrust",
+  [PASEO_NATIVE_GALLERY_NOTICE]: "paseoNative",
   "agy is not installed (or not on PATH)": "agyMissing",
   "This plugin source is not a marketplace you added. Install it only if you trust the source.": "untrustedMarketplace",
   "Claude installs plugins from marketplace sources only.": "claudeMarketplaceOnly",
@@ -60,7 +49,36 @@ const exact = {
   "Claude는 마켓플레이스 출처만 지원합니다.": "claudeMarketplaceOnly",
   "아직 추가되지 않은 마켓플레이스는 user 설정에 함께 추가됩니다.": "marketplaceAutoAdd",
   "인증 상태를 읽을 수 없습니다.": "authUnknown",
+  // Source validation (server/core/source.ts), shown when a source install preview is refused.
+  "Git source must be an https URL, git@host:owner/repo, or owner/repo.": "sourceGitForm",
+  "Git source path is invalid.": "sourceGitPath",
+  "Git URLs must use https.": "sourceHttps",
+  "Marketplace URLs must use https.": "sourceHttps",
+  "Remove credentials from the Git URL.": "sourceCredentials",
+  "Remove credentials from the marketplace URL.": "sourceCredentials",
+  "Git URLs must not have a query or fragment.": "sourceGitQuery",
+  "Git URL needs a valid host and repository path.": "sourceGitHost",
+  "Git ref is invalid.": "sourceRef",
+  "Plugin path must be a relative path inside the source.": "sourcePath",
+  "Give the version once.": "sourceVersionTwice",
+  "npm package name is invalid.": "sourceNpmName",
+  "npm version must be an exact version or a dist-tag.": "sourceNpmVersion",
+  "Directory must be an absolute path.": "sourceAbsolute",
+  "Path is not a directory.": "sourceNotDir",
+  "Directory does not exist.": "sourceNoDir",
+  "Marketplace URL must not have a fragment.": "sourceMarketFragment",
+  "Marketplace URL host is invalid.": "sourceMarketHost",
+  "Marketplace URL is invalid.": "sourceMarketUrl",
+  "Marketplace source must be owner/repo, an https URL, or an absolute path.": "sourceMarketForm",
 } satisfies Record<string, StaticKey>;
+
+// Source checks name the field first ("Git source is empty."); the field is clear from the form.
+const staticPatterns: readonly (readonly [StaticKey, RegExp])[] = [
+  ["sourceEmpty", /^.+ is empty\.$/],
+  ["sourceTooLong", /^.+ is too long\.$/],
+  ["sourceControl", /^.+ contains control characters\.$/],
+  ["sourceDash", /^.+ must not start with "-"\.$/],
+];
 
 type DetailKey = { [K in keyof Diagnostic]: Diagnostic[K] extends `${string}{{detail}}${string}` ? K : never }[keyof Diagnostic];
 const details: readonly (readonly [DetailKey, RegExp])[] = [
@@ -74,20 +92,16 @@ const details: readonly (readonly [DetailKey, RegExp])[] = [
   ["exitCode", /^(?:exit |Claude CLI 종료 코드: )(-?\d+)$/],
   ["exitCode", /^Codex failed during .+ \(exit (.+)\)\.$/],
   ["invalidResponse", /^(Codex) returned (?:an invalid MCP list|invalid JSON for .+)\.$/],
-  ["invalidResponse", /^(Paseo) returned an invalid (?:installed plugin list|update result)\.$/],
-  ["invalidResponse", /^(Paseo registry) returned an invalid catalog\.$/],
   ["invalidResponse", /^(Claude CLI) returned incomplete JSON\. Check the output size limit\.$/],
   // "project scope ..." is an exact match (projectRequired); other scopes name themselves.
   ["scopeNeedsWorkspace", /^(local) scope needs a workspace directory$/],
   ["scopeNeedsWorkspace", /^프로젝트 디렉터리를 선택해야 (local|project) 범위에 설치할 수 있습니다\.$/],
-  ["registryHttp", /^Paseo registry returned HTTP (\d+)\.$/],
   ["writeFailed", /^write failed: ([\s\S]+)$/],
   ["badConfig", /^(.+): mcp_config\.json is (?:not a JSON object|not valid JSON:[\s\S]+); not modified$/],
   ["outsideProject", /^project (\.agents directory|mcp_config\.json) resolves outside the project; refusing$/],
   ["missingServer", /^MCP server "(.+)" not found(?: in agy config files)?$/],
   ["existingServer", /^MCP server "(.+)" already exists$/],
   ["ambiguousServer", /^"(.+)" exists in both project and user config; pass a scope$/],
-  ["updateNotApplied", /^Paseo did not apply the update \((.+)\)\.$/],
   ["codexBrowser", /^Codex HTTP add can launch OAuth in a browser\..+ run codex mcp login (.+) --no-browser\.$/],
 ];
 
@@ -109,6 +123,7 @@ export function localizeDiagnostic(t: Translate, text: string): string {
   if (text.startsWith("agy is not installed (or not on PATH): ")) {
     return `${t("diagnostic.agyMissing")} ${text.slice("agy is not installed (or not on PATH): ".length)}`;
   }
+  for (const [key, pattern] of staticPatterns) if (pattern.test(text)) return t(`diagnostic.${key}`);
   for (const [key, pattern] of details) {
     const match = pattern.exec(text);
     if (match) return t(`diagnostic.${key}`, { detail: match[1] });

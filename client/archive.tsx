@@ -66,6 +66,8 @@ export function useArchive(target: ArchiveTarget | null): ArchiveState {
         if (result.error) failed += 1;
       }
       if (failed > 0) toast.error(t("archiveEmptiedFailed", { n: failed }));
+      // The row just vanishes otherwise; say where it went.
+      else toast.show(t("archiveDone"));
     };
     run()
       .catch((error: unknown) => {
@@ -120,12 +122,18 @@ export function ArchiveModal({
   danger,
   p,
   labels,
+  error,
+  confirmHidden,
   ...content
 }: {
   state: ArchiveState;
   title: string;
   danger: boolean;
   p: Palette;
+  /** Why the last attempt failed, under the warning. The dialog stays open to show it. */
+  error?: string | null;
+  /** Nothing to confirm (the action cannot run from here): only the cancel button is shown. */
+  confirmHidden?: boolean;
   /** Overrides for dialogs other than archive, such as removing a project. */
   labels?: { heading: string; icon: string; confirm: string; pending: string; cancel: string };
 } & ({ warning: string } | { target: ArchiveTarget; descendants: number })) {
@@ -144,7 +152,8 @@ export function ArchiveModal({
     if (worktrees > 0) parts.push(t("archiveAdditionalWorktrees", { n: worktrees }));
     if (descendants > 0) parts.push(t("archiveDescendants", { n: descendants }));
     if (refs.length > 0) parts.push(t("archiveEmptied", { n: refs.length }));
-    warning = parts.length ? parts.join(" · ") : t("archiveMove");
+    // One line per consequence: run together, the folder warnings got lost among the counts.
+    warning = parts.length ? parts.map((part) => `• ${part}`).join("\n") : t("archiveMove");
   }
   return (
     <Modal
@@ -162,6 +171,11 @@ export function ArchiveModal({
         <Text style={{ color: danger ? p.danger : p.muted, fontSize: 13, lineHeight: 19 }}>
           {warning}
         </Text>
+        {error ? (
+          <Text selectable style={{ color: p.danger, fontSize: 13, lineHeight: 19 }}>
+            {error}
+          </Text>
+        ) : null}
         <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
           <Pressable
             accessibilityRole="button"
@@ -179,7 +193,7 @@ export function ArchiveModal({
           >
             <Text style={{ color: p.foreground, fontSize: 13 }}>{l.cancel}</Text>
           </Pressable>
-          <Pressable
+          {confirmHidden ? null : <Pressable
             accessibilityRole="button"
             accessibilityLabel={l.confirm}
             disabled={state.pending}
@@ -195,7 +209,7 @@ export function ArchiveModal({
             <Text style={{ color: danger ? "#ffffff" : p.background, fontSize: 13, fontWeight: "600" }}>
               {state.pending ? l.pending : l.confirm}
             </Text>
-          </Pressable>
+          </Pressable>}
         </View>
       </Modal.Content>
     </Modal>

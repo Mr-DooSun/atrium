@@ -1,5 +1,6 @@
 import { readFile, realpath } from "node:fs/promises";
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AccountIdentity } from "../../shared/usage/types";
@@ -22,6 +23,8 @@ export interface DetectedAccount {
   keychainUser?: string;
   nonLocalOAuth?: boolean;
   identity?: AccountIdentity;
+  /** Hashed, provider-scoped quota identity; absent when local metadata cannot prove it. */
+  quotaIdentity?: string;
 }
 
 export interface DetectedCodexAccount {
@@ -30,6 +33,8 @@ export interface DetectedCodexAccount {
   label: string;
   configHome: string;
   identity?: AccountIdentity;
+  /** Hashed, provider-scoped quota identity; absent when local metadata cannot prove it. */
+  quotaIdentity?: string;
 }
 
 export interface AccountDetectionOptions {
@@ -40,6 +45,11 @@ export interface AccountDetectionOptions {
   realpath?: (directory: string) => Promise<string>;
   /** Canonical homes already covered by a built-in usage source. */
   excludeConfigHomes?: ReadonlySet<string>;
+}
+
+function quotaIdentity(provider: string, ...ids: unknown[]): string | undefined {
+  if (!ids.every((id) => typeof id === "string" && id.trim().length > 0)) return;
+  return createHash("sha256").update(JSON.stringify([provider, ...ids])).digest("hex");
 }
 
 export function parseAccountIdentity(value: unknown): AccountIdentity | undefined {
@@ -112,11 +122,12 @@ export async function detectClaudeAccounts(
       const files = [join(configHome, ".claude.json")];
       if (!configDir) files.push(join(home, ".claude.json"));
       for (const file of files) {
-        const identity = await read(file).then(parseJson).then(parseAccountIdentity).catch(() => undefined);
-        if (identity) {
-          account.identity = identity;
-          break;
-        }
+        const state = await read(file).then(parseJson).catch(() => undefined);
+        const oauth = asRecord(asRecord(state)?.oauthAccount);
+        const identity = parseAccountIdentity(state);
+        account.quotaIdentity = quotaIdentity("claude", oauth?.accountUuid, oauth?.organizationUuid);
+        if (identity) account.identity = identity;
+        if (identity || account.quotaIdentity) break;
       }
     }
     accounts.set(key, account);
@@ -165,9 +176,18 @@ export async function detectCodexAccounts(
       existing.profileIds.push(profile.id);
       continue;
     }
-    const identity = await read(join(configHome, "auth.json"))
-      .then(parseJson).then(parseCodexIdentity).catch(() => undefined);
-    accounts.set(key, { provider: "codex", profileIds: [profile.id], label: profile.label, configHome, identity });
+    const state = await read(join(configHome, "auth.json")).then(parseJson).catch(() => undefined);
+    const tokens = asRecord(asRecord(state)?.tokens);
+    const claims = readJwtClaims(tokens?.id_token);
+    const auth = asRecord(claims?.["https://api.openai.com/auth"]);
+    const accountId = nonemptyString(tokens?.account_id) ?? nonemptyString(auth?.chatgpt_account_id);
+    // Team workspace ids can be shared by several users; keep their quota identities apart.
+    const userId = nonemptyString(auth?.chatgpt_user_id) ?? nonemptyString(claims?.sub);
+    const identity = parseCodexIdentity(state);
+    accounts.set(key, {
+      provider: "codex", profileIds: [profile.id], label: profile.label, configHome, identity,
+      quotaIdentity: quotaIdentity("codex", accountId, userId),
+    });
   }
   return [...accounts.values()];
 }

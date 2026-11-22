@@ -10,16 +10,33 @@ features or behavior changes go in a minor release (0.2.0).
 ### Added
 
 - A listing image of the usage cards for additional accounts (`assets/listing-05-usage.jpg`), made from sample data.
+- "Hide from sidebar" replaces "Remove from sidebar": the current sidebar daemon saves visibility for projects on any host alongside sidebar order, keyed by project host and ID, and "Hidden projects" at the bottom shows a project again. Paseo projects, workspaces, sessions and files stay intact.
+- Paseo's own sidebar can show Atrium's worktree badge too (Show menu > Worktree (Atrium)).
+- Panes show who sent an instruction to a sub-agent ("From <name>"), the project and workspace under the pane title, and a banner with "Answer in Paseo" while the agent waits for permission.
 
 ### Changed
 
 - A worktree's color bar runs unbroken through consecutive rows in the same checkout, so a run reads as one line instead of dashes. Runs follow the rows as drawn: a row after a parent's last child continues that child, and a collapsed row's hidden children do not count. The full badge shows on the first row of each run; a row in another checkout between two rows breaks the run, and the next one shows the badge again.
 - A parent row can list the branches its nested sessions work on, under its title, led by an arrow and their count so it never reads as the row's own branch: `5 nested: feat/x` when collapsed, `3 nested: feat/x 2 · main 1` when they span several branches. An expanded row whose nested sessions are all on one branch shows nothing, since their badge and color bar already say it. Branches are in each worktree's color, most used first, collapsed sessions included.
+- Panes send every message through the guarded `chat.send`: an archived or vanished session's pane keeps its history, shows its state, and takes no input; a host the server can't confirm gets a notice with "Open in Paseo" instead of a send.
+- The `/plugins` Paseo tab points to Settings > Plugins on the host; Claude Code, Codex and Antigravity tabs are unchanged.
+- Folded projects, sub-trees and General stay folded across reloads (web, Electron).
+- A workspace with no name of its own and one agent is named after that agent, so several workspaces on one branch no longer all read `main`.
 
 ### Fixed
 
 - Claude Code messages in the toolbox (missing profile, timeouts, scope and marketplace warnings, sign-in status and MCP sign-in steps) were always shown in Korean. The Claude adapter now sends English like the other adapters, and the app shows them in its own language.
 - The Simplified Chinese toolbox used two words for "agent". It now uses one.
+- Compact layouts can rename workspaces from the long-press menu, and the empty panes screen explains the long press; compact web panes snap to a pane.
+- Archive confirmations put each consequence on its own line, no longer claim shared or externally added worktrees are deleted, and always warn about unpushed changes; a toast says where an archived session went.
+- Toolbox: refused source installs say why in the app's language and keep what was typed; MCP names are checked before the preview; MCP confirmations show the entry and what an add writes; the project line shows only where scopes apply.
+- Accessibility labels for rows, folding and status marks are translated, and Arabic row text stays beside its icon.
+- Pane move arrows are disabled when the family can't move; a workspace with no agent says why it can't open in panes.
+- Additional usage cards retain full profile names in account labels and error attribution, show a Profile detail, and use distinct “Claude profiles” / “Codex profiles” source headings so they follow each provider's default card in native default order. Usage failures give concise login or retry steps. Server usage APIs expose no client locale, so these messages use English; per-account card titles and status-based ordering remain controlled by Paseo, and saved user order takes precedence.
+- Paseo plugin management now belongs to the target host's native Settings > Plugins. Toolbox no longer fetches its registry or runs Paseo plugin discovery, installation, updates or lifecycle commands; Claude, Codex and Antigravity management retains its profile, validation and preview behavior.
+- Panes retain the sender name and instruction body of `agent_message` timeline entries.
+- Pane message sends can use the guarded `chat.send` RPC, which rejects archived sessions, missing workspace or project placement, and another host's sessions with typed errors. Sends retain steer behavior; attachment and interrupt requests return explicit errors instead of dropping data or interrupting a turn.
+- Usage reports include quota window lengths and original observation times, including cached Claude readings and Codex logs past reset, on Paseo 0.17.1 while retaining 0.16.1 support. Default and extra logins with the same known quota identity, and profile path aliases, no longer produce duplicate cards. Unknown identities remain separate rather than merging by email; Codex logins without a user claim stay separate even when they share a team account ID.
 
 ## [0.5.0] - 2026-11-22
 

@@ -37,6 +37,9 @@ let prunable: string;
 
 const calls = () => (existsSync(logFile) ? readFileSync(logFile, "utf8").split("\n").filter(Boolean) : []);
 const listCalls = () => calls().filter((c) => c.includes("worktree list"));
+// The shim logs `$*`, which starts with `-C <cwd>`: the temp directory's random name can contain "-z"
+// (e.g. atrium-old-git-zQ1234), so look at the last argument, never anywhere in the line.
+const triedZ = (call: string) => call.endsWith(" --porcelain -z");
 
 before(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "atrium-old-git-")));
@@ -105,8 +108,8 @@ describe("git without worktree list -z", () => {
     assert.equal(info.detached, false);
     assert.equal(info.worktreePath, realpathSync(main));
     assert.equal(info.mainWorktreePath, realpathSync(main));
-    assert.equal(listCalls().filter((c) => c.includes("-z")).length, 1, "tried -z once");
-    assert.equal(listCalls().filter((c) => !c.includes("-z")).length, 1, "then the plain porcelain listing once");
+    assert.equal(listCalls().filter(triedZ).length, 1, "tried -z once");
+    assert.equal(listCalls().filter((c) => !triedZ(c)).length, 1, "then the plain porcelain listing once");
   });
 
   test("a linked worktree reports its branch and points at the main worktree", async () => {
@@ -140,6 +143,6 @@ describe("git without worktree list -z", () => {
     writeFileSync(modeFile, "other");
     assert.deepEqual(await getWorktreeInfo(main), { kind: "none" });
     assert.equal(listCalls().length, 1, `worktree list ran again: ${JSON.stringify(listCalls())}`);
-    assert.ok(listCalls()[0].includes("-z"));
+    assert.ok(triedZ(listCalls()[0]));
   });
 });

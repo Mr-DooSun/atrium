@@ -1,7 +1,7 @@
 // The panes screen: many chats side by side, families linked, sessions dropped in from the
 // sidebar. Only panes near the viewport mount and subscribe, so there is no fixed limit.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, Text, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { Platform, Pressable, Text, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import {
   useAgent,
@@ -22,6 +22,7 @@ import {
   arrangeByFamily,
   familyOfferChildren,
   edgeScrollDelta,
+  familyMoves,
   groupByFamily,
   insertionIndex,
   moveGroup,
@@ -41,8 +42,11 @@ import {
 } from "./layout";
 import { NO_TEXT_SELECT, Pane, type PaneLink, type PaneReorderHandlers, type PaneResize } from "./pane";
 import { setPaneWidth, setPanes, usePaneWidths, usePanes } from "./store";
+import { usePendingPermissions } from "../pending-permissions";
 
 const GAP = 12;
+/** Quiet time after the last scroll event before compact web snaps to a pane. */
+const WEB_SNAP_SETTLE_MS = 140;
 const PAD = 12;
 const FAMILY_COLORS = ["#7c6cf2", "#e0739a", "#2fa59a", "#d98a2b", "#4c8fd6", "#a25bd1", "#5aa84a", "#c9574a"];
 
@@ -59,7 +63,7 @@ function toRef(a: PaneRef | AgentRef): AgentRef {
 let zoneSeq = 0;
 
 /** Pane without a linked family: nothing is drawn from it, so one shared object will do. */
-const NO_LINK: PaneLink = { color: "transparent", size: 1, index: 0, depth: 0, parent: null };
+const NO_LINK: PaneLink = { color: "transparent", size: 1, index: 0, depth: 0, parent: null, canMoveLeft: false, canMoveRight: false };
 
 /** `params.agents` values already applied: remounting with the same params must not resurrect
  *  panes the user closed since. */
@@ -69,6 +73,8 @@ export function PanesScreen(props: PluginScreenProps) {
   const p = useMemo(() => palette(props.theme.colors), [props.theme.colors]);
   const { t } = useTranslation(panesText);
   const panes = usePanes();
+  // The same source the sidebar uses, so a pane and its row agree on "waiting for permission".
+  const pendingPermissions = usePendingPermissions();
   // Timelines and links come from the plugin's own host; other hosts' panes show a notice.
   const ownHost = props.host.id;
 
@@ -130,8 +136,10 @@ export function PanesScreen(props: PluginScreenProps) {
   const arranged = useMemo(() => groups.flatMap((g) => g.panes), [groups]);
   const linkOf = useMemo(() => {
     const out = new Map<string, PaneLink>();
-    for (const g of groups) {
+    groups.forEach((g, groupIndex) => {
       const color = familyColor(g.rootKey);
+      // A family moves as one block, among the other blocks.
+      const { canMoveLeft, canMoveRight } = familyMoves(groupIndex, groups.length);
       const present = new Set(g.panes.map((x) => x.key));
       g.panes.forEach((pane, index) => {
         let parent: AgentRef | null = null;
@@ -146,9 +154,9 @@ export function PanesScreen(props: PluginScreenProps) {
           seen.add(cur);
           cur = parentOf(cur);
         }
-        out.set(pane.key, { color, size: g.panes.length, index, depth: g.depths[index], parent });
+        out.set(pane.key, { color, size: g.panes.length, index, depth: g.depths[index], parent, canMoveLeft, canMoveRight });
       });
-    }
+    });
     return out;
   }, [groups, parentOf]);
 
@@ -217,8 +225,18 @@ export function PanesScreen(props: PluginScreenProps) {
   }, []);
   const navigation = props.navigation;
   const onOpen = useCallback(
-    (agent: AgentRef) => navigation?.openAgent({ agentId: agent.id, serverId: agent.hostId }),
-    [navigation],
+    (agent: AgentRef) => {
+      if (!navigation) return;
+      // Paseo 0.17.1+: opening a chat on another host can also switch the sidebar to that host,
+      // or the chat opens under a sidebar still showing this one. Only asked for across hosts:
+      // focusing clears the sidebar's project and label filters, which a same-host open must keep.
+      // The 0.16 SDK types lack both fields, hence the widened type.
+      const nav = navigation as typeof navigation & { supportsFocusHost?: boolean };
+      const focusHost = nav.supportsFocusHost === true && agent.hostId !== ownHost;
+      const input = { agentId: agent.id, serverId: agent.hostId, ...(focusHost ? { focusHost: true } : {}) };
+      navigation.openAgent(input);
+    },
+    [navigation, ownHost],
   );
 
   // The global listener (index.tsx) adds the pane and opens this screen; here only offer the
@@ -373,9 +391,24 @@ export function PanesScreen(props: PluginScreenProps) {
     const { width, height } = e.nativeEvent.layout;
     setViewport((v) => (v.width === width && v.height === height ? v : { width, height }));
   };
+  // snapToInterval only works natively. On compact web the scroll would stop with a pane cut in
+  // half, so once scrolling settles it eases to the nearest pane.
+  const snapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (snapTimer.current) clearTimeout(snapTimer.current);
+  }, []);
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollXRef.current = e.nativeEvent.contentOffset.x;
-    setScrollX(e.nativeEvent.contentOffset.x);
+    const x = e.nativeEvent.contentOffset.x;
+    scrollXRef.current = x;
+    setScrollX(x);
+    if (Platform.OS !== "web" || !compact || reordering || resizing) return;
+    if (snapTimer.current) clearTimeout(snapTimer.current);
+    snapTimer.current = setTimeout(() => {
+      snapTimer.current = null;
+      const step = width + GAP;
+      const target = Math.round(scrollXRef.current / step) * step;
+      if (Math.abs(target - scrollXRef.current) > 1) scrollRef.current?.scrollTo({ x: target, animated: true });
+    }, WEB_SNAP_SETTLE_MS);
   };
   // Stable AgentRef per pane key, so memo(Pane) holds across scroll and resize renders.
   const refCache = useRef(new Map<string, AgentRef>());
@@ -426,7 +459,7 @@ export function PanesScreen(props: PluginScreenProps) {
         >
           <Icon name="Columns3" size={28} color={dragging ? p.running : p.muted} />
           <Text style={{ color: dragging ? p.running : p.muted, fontSize: 13, textAlign: "center", maxWidth: 360 }}>
-            {dragging ? t("dropHere") : t("empty")}
+            {dragging ? t("dropHere") : t(compact ? "emptyCompact" : "empty")}
           </Text>
         </View>
       ) : (
@@ -456,6 +489,7 @@ export function PanesScreen(props: PluginScreenProps) {
                   p={p}
                   link={linkOf.get(pane.key) ?? NO_LINK}
                   otherHost={pane.hostId === ownHost ? null : pane.hostId}
+                  waitingPermission={pendingPermissions.get(pane.hostId)?.has(pane.id) ?? false}
                   onClose={onClose}
                   onOpen={onOpen}
                   onMoveFamily={onMoveFamily}
@@ -490,7 +524,7 @@ function Toolbar({ count, p, onCloseAll }: { count: number; p: Palette; onCloseA
   return (
     <View style={{ height: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: PAD, borderBottomWidth: 1, borderBottomColor: p.guide }}>
       <Icon name="Columns3" size={15} color={p.muted} />
-      <Text style={{ flex: 1, color: p.muted, fontSize: 13 }}>{t("count", { n: count })}</Text>
+      <Text style={{ flex: 1, color: p.muted, fontSize: 13, textAlign: "left" }}>{t("count", { n: count })}</Text>
       {count > 0 ? (
         <Pressable
           accessibilityRole="button"

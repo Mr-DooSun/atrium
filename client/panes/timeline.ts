@@ -228,3 +228,34 @@ export function clearTimelineError(state: Timelines, agentId: string): Timelines
   else next.set(agentId, { ...prev, error: null });
   return next;
 }
+
+/** Why a session can no longer take messages, as far as the pane can tell. "removed": gone from
+ *  the host (archived and dropped from the snapshot, or its agent/workspace/project no longer
+ *  exists) without the server saying which; "archived": the server said so. */
+export type UnavailableReason = "archived" | "removed";
+
+/**
+ * Reads a send answer or a thrown send error for "this agent is gone". The server answers
+ * `{ ok: false, error: { code: "agent_unavailable", reason } }` for an archived or deleted agent
+ * (or one whose workspace or project is gone); an error object may carry the same `code`/`reason`
+ * or a bare code such as `agent_not_found`. Anything else is an ordinary failure: null.
+ */
+export function unavailableReason(answer: unknown): UnavailableReason | null {
+  const record = (value: unknown): Record<string, unknown> | null =>
+    value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const outer = record(answer);
+  if (!outer) return null;
+  const inner = outer.ok === false ? record(outer.error) : outer;
+  if (!inner) return null;
+  const code = typeof inner.code === "string" ? inner.code : "";
+  const reason = typeof inner.reason === "string" ? inner.reason : "";
+  if (code === "agent_unavailable") {
+    if (reason === "archived") return "archived";
+    // A host mismatch or an unknown host is not the agent being gone: the pane can be reopened.
+    if (reason === "host_unknown" || reason === "host_mismatch") return null;
+    return "removed";
+  }
+  if (/archived/i.test(code)) return "archived";
+  if (/^(?:agent_)?(?:not_found|missing|deleted|removed)$/i.test(code)) return "removed";
+  return null;
+}
