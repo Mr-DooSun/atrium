@@ -1,3 +1,4 @@
+import "./helpers/isolated-home.ts";
 // Adversarial cases for getWorktreeInfo: default branch detection, odd paths, prunable and locked
 // worktrees, inherited GIT_* variables, submodules, path aliases, the LRU bound, and the TTL.
 //

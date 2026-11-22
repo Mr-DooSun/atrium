@@ -236,11 +236,25 @@ describe("installed list filters, counts and sort", () => {
       assert.deepEqual([...sorts], types.ECOSYSTEM_CAPS[eco].sorts.length ? [...types.ECOSYSTEM_CAPS[eco].sorts] : ["name"], eco);
       assert.equal(sorts[0], "name", `${eco}: name is the default`);
     }
-    assert.ok(catalogSorts("paseo").length > 1);
+    assert.deepEqual([...catalogSorts("paseo")], ["name"], "native Paseo has no browse sorts");
+    assert.ok(catalogSorts("claude").length > 1);
     assert.equal(catalogSorts("codex").length, 1);
     assert.equal(catalogSorts("antigravity").length, 1);
     // The screen renders the control only when there is more than one sort.
     assert.match(readFileSync(join(process.cwd(), "client/toolbox/plugins-screen.tsx"), "utf8"), /sorts\.length > 1 \?/);
+  });
+
+  test("Paseo is native-only: no plugin or marketplace actions, no sources, scopes or browsing", () => {
+    const caps = types.ECOSYSTEM_CAPS;
+    assert.equal(caps.paseo.management, "native");
+    assert.deepEqual(
+      [caps.paseo.plugin, caps.paseo.marketplace, caps.paseo.sources, caps.paseo.scopes, caps.paseo.browse],
+      [[], [], [], [], false]);
+    assert.deepEqual([...caps.paseo.sorts], ["name"]);
+    for (const eco of ["claude", "codex", "antigravity"] as const) {
+      assert.equal(caps[eco].management, "toolbox", eco);
+      assert.ok(caps[eco].plugin.length > 0, eco);
+    }
   });
 
   test("tracking keys", () => {

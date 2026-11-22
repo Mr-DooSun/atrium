@@ -108,3 +108,59 @@ test('chat events accept a row code this version does not know',()=>{
  assert.equal(chatOlder.output.safeParse({items:[row],hasMore:false}).success,true);
  assert.equal(ChatItem.safeParse({...row,code:7}).success,false);
 });
+
+// ---- U-2: agent_message tool calls are instructions from another agent ----
+const toolCall = (extra: object) => toChatItem({
+  item: {type:'tool_call', callId:'c9', name:'agent_message', status:'completed', ...extra}, seqStart:7, timestamp:'2026-01-01',
+} as Parameters<typeof toChatItem>[0]);
+
+test('agent_message tool call becomes a user row with the message text and the sender name', () => {
+  const row = toolCall({agentMessage:{text:'please review', sender:{id:'agent-1', title:'Planner'}}});
+  assert.deepEqual([row.kind, row.text, row.senderName, row.id], ['user', 'please review', 'Planner', 'tool:c9']);
+  assert.equal(row.toolName, undefined);
+  assert.equal(row.seq, 7);
+  assert.equal(row.at, '2026-01-01');
+  assert.equal(ChatItem.safeParse(row).success, true);
+});
+
+test('agent_message: agentMessage.text wins over detail.text; detail is the fallback', () => {
+  assert.equal(toolCall({agentMessage:{text:'first'}, detail:{text:'second'}}).text, 'first');
+  assert.equal(toolCall({agentMessage:{sender:{id:'a'}}, detail:{text:'from detail'}}).text, 'from detail');
+  assert.equal(toolCall({detail:{text:'only detail'}}).text, 'only detail');
+  assert.equal(toolCall({agentMessage:{text:''}, detail:{text:'x'}}).kind, 'tool', 'an empty agentMessage.text is not a message and the detail is not mixed in');
+});
+
+test('agent_message: sender title, then sender id, then the detail sender; none leaves senderName out', () => {
+  assert.equal(toolCall({agentMessage:{text:'t', sender:{id:'agent-1', title:'Planner'}}}).senderName, 'Planner');
+  assert.equal(toolCall({agentMessage:{text:'t', sender:{id:'agent-1', title:''}}}).senderName, 'agent-1');
+  assert.equal(toolCall({agentMessage:{text:'t', sender:{id:'agent-1'}}}).senderName, 'agent-1');
+  assert.equal(toolCall({detail:{text:'t', sender:{title:'From detail'}}}).senderName, 'From detail');
+  const anonymous = toolCall({agentMessage:{text:'t'}});
+  assert.equal(anonymous.kind, 'user');
+  assert.equal('senderName' in anonymous, false);
+  assert.equal(ChatItem.safeParse(anonymous).success, true);
+});
+
+test('agent_message without any text, or with malformed fields, stays a safe tool row', () => {
+  for (const extra of [{}, {agentMessage:null}, {agentMessage:'x'}, {agentMessage:[]}, {detail:'x'}, {detail:{text:5}}, {agentMessage:{text:5}, detail:{text:null}}, {agentMessage:{text:'  '.slice(0, 0)}}]) {
+    const row = toolCall(extra);
+    assert.equal(row.kind, 'tool', JSON.stringify(extra));
+    assert.equal(row.toolName, 'agent_message', JSON.stringify(extra));
+    assert.equal(ChatItem.safeParse(row).success, true, JSON.stringify(extra));
+  }
+});
+
+test('other tool names and unknown kinds with agentMessage-like fields are unaffected', () => {
+  const shell = toChatItem({item:{type:'tool_call', callId:'c1', name:'shell', status:'running', agentMessage:{text:'x'}}, seqStart:1, timestamp:'t'} as Parameters<typeof toChatItem>[0]);
+  assert.deepEqual([shell.kind, shell.text, shell.toolName], ['tool', 'shell (running)', 'shell']);
+  for (const item of [{type:'future', agentMessage:{text:'x'}}, {type:'agent_message', text:'x'}, {type:'tool_call', name:'agent_message_v2', agentMessage:{text:'x'}}]) {
+    const row = toChatItem({item, seqStart:1, timestamp:'t'} as Parameters<typeof toChatItem>[0]);
+    assert.notEqual(row.kind, 'user', JSON.stringify(item));
+    assert.equal(ChatItem.safeParse(row).success, true, JSON.stringify(item));
+  }
+});
+
+test('agent_message without a call id keeps the sequence id', () => {
+  const row = toChatItem({item:{type:'tool_call', name:'agent_message', agentMessage:{text:'t'}}, seqStart:11, timestamp:'t'} as Parameters<typeof toChatItem>[0]);
+  assert.deepEqual([row.kind, row.id], ['user', '11']);
+});

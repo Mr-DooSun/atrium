@@ -169,3 +169,38 @@ test("http errors yield schema-valid accounts with unknown warning level", async
     assert.equal(a.warningLevel, "unknown");
   }
 });
+
+// ---- A-6: observedAt is the real API completion time and survives the TTL cache ----
+test("observedAt: set when the API call completes, unchanged on TTL cache hits, renewed on refetch", async () => {
+  let clock = T0;
+  const calls: number[] = [];
+  const svc = createUsageService({
+    now: () => clock, platform: "darwin", localFiles: emptyFiles as never,
+    readKeychain: async () => JSON.stringify({ claudeAiOauth: { accessToken: TOKEN, expiresAt: T0 + 1e9 } }),
+    fetch: async () => {
+      calls.push(clock);
+      clock += 2_000; // the request takes 2s: the observation is when it completed
+      return { status: 200, ok: true, headers: { get: () => null }, json: async () => ({ five_hour: { utilization: 10 } }) };
+    },
+  });
+  const first = await svc.read(acct("/a"));
+  const observed = new Date(T0 + 2_000).toISOString();
+  assert.equal(first.rateLimits.observedAt, observed);
+  clock += 30_000;
+  const cached = await svc.read(acct("/a"));
+  assert.equal(calls.length, 1, "served from cache");
+  assert.equal(cached.rateLimits.observedAt, observed, "not replaced by the read time");
+  clock += 31_000; // past the 60s TTL
+  const fresh = await svc.read(acct("/a"));
+  assert.equal(calls.length, 2);
+  assert.equal(fresh.rateLimits.observedAt, new Date(calls[1] + 2_000).toISOString());
+  AccountUsage.parse(fresh);
+});
+
+test("observedAt: not invented for failed reads", async () => {
+  for (const status of [401, 429, 500]) {
+    const h = harness(() => ({ status }));
+    const a = await h.svc.read(acct("/a"));
+    assert.equal(a.rateLimits.observedAt, undefined, String(status));
+  }
+});
