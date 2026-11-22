@@ -7,6 +7,8 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-23
+
 ### Added
 
 - A listing image of the usage cards for additional accounts (`assets/listing-05-usage.jpg`), made from sample data.
@@ -18,8 +20,7 @@ features or behavior changes go in a minor release (0.2.0).
 
 - A worktree's color bar runs unbroken through consecutive rows in the same checkout, so a run reads as one line instead of dashes. Runs follow the rows as drawn: a row after a parent's last child continues that child, and a collapsed row's hidden children do not count. The full badge shows on the first row of each run; a row in another checkout between two rows breaks the run, and the next one shows the badge again.
 - A parent row can list the branches its nested sessions work on, under its title, led by an arrow and their count so it never reads as the row's own branch: `5 nested: feat/x` when collapsed, `3 nested: feat/x 2 · main 1` when they span several branches. An expanded row whose nested sessions are all on one branch shows nothing, since their badge and color bar already say it. Branches are in each worktree's color, most used first, collapsed sessions included.
-- Panes send every message through the guarded `chat.send`: an archived or vanished session's pane keeps its history, shows its state, and takes no input; a host the server can't confirm gets a notice with "Open in Paseo" instead of a send.
-- The `/plugins` Paseo tab points to Settings > Plugins on the host; Claude Code, Codex and Antigravity tabs are unchanged.
+- Panes send every message through the guarded `chat.send`: an archived or vanished session's pane keeps its history, shows its state, and takes no input; a host the server can't confirm gets a notice with "Open in Paseo" instead of a send. Sends keep steer behavior; attachments and interrupts are refused with an explicit error instead of dropping data or interrupting a turn.
 - Folded projects, sub-trees and General stay folded across reloads (web, Electron).
 - A workspace with no name of its own and one agent is named after that agent, so several workspaces on one branch no longer all read `main`.
 
@@ -33,10 +34,12 @@ features or behavior changes go in a minor release (0.2.0).
 - Accessibility labels for rows, folding and status marks are translated, and Arabic row text stays beside its icon.
 - Pane move arrows are disabled when the family can't move; a workspace with no agent says why it can't open in panes.
 - Additional usage cards retain full profile names in account labels and error attribution, show a Profile detail, and use distinct “Claude profiles” / “Codex profiles” source headings so they follow each provider's default card in native default order. Usage failures give concise login or retry steps. Server usage APIs expose no client locale, so these messages use English; per-account card titles and status-based ordering remain controlled by Paseo, and saved user order takes precedence.
-- Paseo plugin management now belongs to the target host's native Settings > Plugins. Toolbox no longer fetches its registry or runs Paseo plugin discovery, installation, updates or lifecycle commands; Claude, Codex and Antigravity management retains its profile, validation and preview behavior.
-- Panes retain the sender name and instruction body of `agent_message` timeline entries.
-- Pane message sends can use the guarded `chat.send` RPC, which rejects archived sessions, missing workspace or project placement, and another host's sessions with typed errors. Sends retain steer behavior; attachment and interrupt requests return explicit errors instead of dropping data or interrupting a turn.
 - Usage reports include quota window lengths and original observation times, including cached Claude readings and Codex logs past reset, on Paseo 0.17.1 while retaining 0.16.1 support. Default and extra logins with the same known quota identity, and profile path aliases, no longer produce duplicate cards. Unknown identities remain separate rather than merging by email; Codex logins without a user claim stay separate even when they share a team account ID.
+
+### Removed
+
+- Atrium no longer manages Paseo plugins. The `/plugins` Paseo tab points to Settings > Plugins on the host, and the toolbox no longer fetches the Paseo plugin registry or runs Paseo plugin discovery, installation, updates or lifecycle commands. Claude Code, Codex and Antigravity tabs keep their profile, validation and preview behavior.
+- Atrium no longer deletes Paseo projects. Removing a project from Paseo is done from Paseo's own sidebar; Atrium only hides it (see Added).
 
 ## [0.5.0] - 2026-11-22
 
@@ -153,7 +156,8 @@ First public release.
 - The toolbox confirmation shows the full command and no longer repeats warnings.
 - Calls to the Paseo CLI pass `--home` explicitly, and displayed paths are shortened to `~` only inside the home folder.
 
-[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.4.0
 [0.3.2]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.3.2
