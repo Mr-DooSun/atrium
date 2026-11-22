@@ -95,7 +95,7 @@ function update(change: (stored: Stored) => void): Promise<Stored> {
   return next;
 }
 
-/** Shares the order write queue so simultaneous ordering and visibility edits cannot overwrite each other. */
+/** Stores any project's host namespace in this daemon's view preferences, using the order write queue. */
 export async function setProjectHidden(hostId: string, projectId: string, hidden: boolean): Promise<HiddenProject[]> {
   const key = hiddenProjectKey(hostId, projectId);
   const stored = await update((stored) => {

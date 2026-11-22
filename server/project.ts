@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { hideProject, unhideProject, projectWorktrees, removeProject, type WorktreeInfo } from "../shared/project-rpc";
+import { hideProject, unhideProject, projectWorktrees, projectHostIdSchema, removeProject, type WorktreeInfo } from "../shared/project-rpc";
 import { ownHostId } from "./core/host-id.ts";
 import { setProjectHidden } from "./project-order";
 import { getWorktreeInfo } from "./core/worktree.ts";
@@ -21,12 +21,14 @@ export function registerProject(server: PluginServerContext) {
   });
 
   for (const [rpc, hidden] of [[hideProject, true], [unhideProject, false], [removeProject, true]] as const) {
-    server.handle(rpc, async ({ projectId, hostId }, context) => {
-      if (!hostId) throw new Error("Project target host is required. Refresh Atrium before hiding projects.");
-      const currentHostId = await ownHostId(context?.paseo);
-      if (!currentHostId) throw new Error("This daemon's host could not be identified.");
-      if (hostId !== currentHostId) throw new Error("Project target host does not match this daemon.");
-      return { ok: true as const, hiddenProjects: await setProjectHidden(hostId, projectId, hidden) };
+    server.handle(rpc, async ({ projectId, hostId }) => {
+      const projectHost = projectHostIdSchema.safeParse(hostId);
+      if (!projectHost.success) {
+        throw new Error("Project target host is required and must be 1–256 characters without whitespace.");
+      }
+      // Like order keys, visibility may name any project host. Only this RPC daemon's
+      // sidebar preference file changes; no connection to the project's host is needed.
+      return { ok: true as const, hiddenProjects: await setProjectHidden(projectHost.data, projectId, hidden) };
     });
   }
 }

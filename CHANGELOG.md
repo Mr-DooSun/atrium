@@ -10,7 +10,7 @@ features or behavior changes go in a minor release (0.2.0).
 ### Added
 
 - A listing image of the usage cards for additional accounts (`assets/listing-05-usage.jpg`), made from sample data.
-- "Hide from sidebar" replaces "Remove from sidebar": the daemon saves visibility by host and project alongside sidebar order, and "Hidden projects" at the bottom shows a project again. Paseo projects, workspaces, sessions and files stay intact.
+- "Hide from sidebar" replaces "Remove from sidebar": the current sidebar daemon saves visibility for projects on any host alongside sidebar order, keyed by project host and ID, and "Hidden projects" at the bottom shows a project again. Paseo projects, workspaces, sessions and files stay intact.
 - Paseo's own sidebar can show Atrium's worktree badge too (Show menu > Worktree (Atrium)).
 - Panes show who sent an instruction to a sub-agent ("From <name>"), the project and workspace under the pane title, and a banner with "Answer in Paseo" while the agent waits for permission.
 

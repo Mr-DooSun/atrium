@@ -1,13 +1,17 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
+/** Project host namespace, independent of the daemon storing this sidebar's preferences. */
+export const projectHostIdSchema = z.string().min(1).max(256).regex(/^\S+$/);
+
 /** Sidebar visibility only; these RPCs never remove Paseo projects or archive sessions. */
-export const hiddenProjectSchema = z.object({ hostId: z.string().min(1), projectId: z.string().min(1) });
+export const hiddenProjectSchema = z.object({ hostId: projectHostIdSchema, projectId: z.string().min(1) });
 export type HiddenProject = z.infer<typeof hiddenProjectSchema>;
 export const projectVisibilityInputSchema = z.object({
   projectId: z.string().min(1),
   // Optional for older clients' type compatibility only: the server rejects omission.
-  hostId: z.string().min(1).max(256).regex(/^\S+$/).optional(),
+  // The project's host, not the current RPC host. Offline and other-host projects are allowed.
+  hostId: projectHostIdSchema.optional(),
 });
 const visibilityOutput = z.object({ ok: z.literal(true), hiddenProjects: z.array(hiddenProjectSchema) });
 export const hideProject = defineRpc({ name: "project.hide", input: projectVisibilityInputSchema, output: visibilityOutput });
