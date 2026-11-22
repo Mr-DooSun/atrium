@@ -32,7 +32,7 @@ import {
 } from "./archive";
 import { RenameButton, RenameModal, renameFallback, useRename } from "./rename";
 import { HiddenProjects, HideProjectModal, useHideProject } from "./hide-project";
-import { MoveButton, PanesButton, ProjectMenu, ReorderBar, SessionMenu, isPaneDrag, keepHiddenSlots, outsideSidebar, useProjectOrder } from "./project-order";
+import { MoveButton, PanesButton, ProjectMenu, ReorderBar, SessionMenu, isPaneDrag, outsideSidebar, useProjectOrder } from "./project-order";
 import {
   beginSessionDrag,
   endSessionDrag,
@@ -58,7 +58,7 @@ import { sidebarText } from "./sidebar-strings";
 import { usePendingPermissions } from "./pending-permissions";
 import { useWorktrees } from "./worktrees";
 import { useCollapsed } from "./collapsed-store";
-import { hiddenKeySet, isHiddenProject, visibleProjectBlocks } from "./sidebar-visibility";
+import { hiddenKeySet, isHiddenProject, reorderSection, sectionSaved, visibleProjectBlocks } from "./sidebar-visibility";
 import { workspaceCustomTitle, workspaceRowLabel } from "./workspace-naming";
 
 const ROOT = "__root__";
@@ -349,9 +349,10 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   const moveProject = useCallback(
     (key: string, delta: -1 | 1) => {
       const shown = sectionOf(key).map((b) => rootOf(b.projectKey));
-      order.save(keepHiddenSlots(move(shown, savedOrder, rootOf(key), delta), savedOrder, hiddenRoots));
+      const host = hostOf(key);
+      order.save(reorderSection(savedOrder, move(shown, sectionSaved(savedOrder, host), rootOf(key), delta), host, hiddenRoots));
     },
-    [sectionOf, order, savedOrder, rootOf, hiddenRoots],
+    [sectionOf, hostOf, order, savedOrder, rootOf, hiddenRoots],
   );
   const projectsGroupOf = useCallback((projectKey: string) => projectsGroup(hostOf(projectKey)), [hostOf]);
 
@@ -509,13 +510,16 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
       if (!land) return;
       const shown = land.all.map((b) => b.key);
       if (isProjectsGroup(target.group)) {
-        order.save(keepHiddenSlots(placeAt(shown.map(rootOf), savedOrder, rootOf(target.key), land.at), savedOrder, hiddenRoots));
+        // Within the dragged project's host section; other hosts' places are left as they are.
+        const host = hostOf(target.key);
+        const next = placeAt(shown.map(rootOf), sectionSaved(savedOrder, host), rootOf(target.key), land.at);
+        order.save(reorderSection(savedOrder, next, host, hiddenRoots));
       } else {
         // Only the children shown now: archived sessions do not come back, so they need no place.
         order.saveNodes(target.group, placeAt(shown, [], target.key, land.at));
       }
     },
-    [landing, order, savedOrder, rootOf, hiddenRoots, stopTimer],
+    [landing, hostOf, order, savedOrder, rootOf, hiddenRoots, stopTimer],
   );
   const dropMark = useMemo((): DropMark | null => {
     if (!drag) return null;

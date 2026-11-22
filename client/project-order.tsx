@@ -81,38 +81,6 @@ export function useProjectOrder(): ProjectOrder {
   };
 }
 
-/**
- * Keeps hidden projects where they were in the saved order. Reordering only sees the shown
- * projects, so the order built from them (move / placeAt) would push every hidden one to the end.
- * Here each hidden key keeps its old slot and the shown keys fill the other slots in their new
- * order; anything left over follows. Keys are project root folders, as in the saved order.
- */
-export function keepHiddenSlots(next: readonly string[], previous: readonly string[], hidden: ReadonlySet<string>): string[] {
-  if (hidden.size === 0) return [...next];
-  const rest = next.filter((key) => !hidden.has(key));
-  const out: string[] = [];
-  const seen = new Set<string>();
-  let i = 0;
-  for (const key of previous) {
-    if (hidden.has(key)) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        out.push(key);
-      }
-    } else if (i < rest.length) {
-      out.push(rest[i++]);
-    }
-  }
-  out.push(...rest.slice(i));
-  for (const key of next) {
-    if (hidden.has(key) && !seen.has(key)) {
-      seen.add(key);
-      out.push(key);
-    }
-  }
-  return out;
-}
-
 /** Pinned above the projects while reordering. */
 export function ReorderBar({ onDone, onReset, canReset, p }: { onDone(): void; onReset(): void; canReset: boolean; p: Palette }) {
   const { t } = useTranslation(sidebarText);
