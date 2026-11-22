@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { describe, test } from "node:test";
 import { hiddenProjectKey } from "../shared/project-rpc.ts";
-import { hiddenKeySet, isHiddenProject, visibleProjectBlocks } from "../client/sidebar-visibility.ts";
+import { hiddenKeySet, isHiddenProject, keepHiddenSlots, orderKeyHost, reorderSection, sectionSaved, visibleProjectBlocks } from "../client/sidebar-visibility.ts";
+import { move, placeAt, projectOrderKey } from "../shared/project-order.ts";
 import { createReact, loadClient, plain } from "./helpers/client-sandbox.ts";
 
 type Any = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 import * as naming from "../client/workspace-naming.ts";
 const source = (file: string) => readFileSync(file, "utf8");
-const { keepHiddenSlots } = loadClient<{ keepHiddenSlots(next: string[], previous: string[], hidden: Set<string>): string[] }>("client/project-order.tsx");
 const keep = (next: string[], previous: string[], hidden: string[]) => plain(keepHiddenSlots(next, previous, new Set(hidden)));
 
 describe("keepHiddenSlots: reordering the shown projects keeps hidden ones in place", () => {
@@ -197,5 +197,92 @@ describe("workspace row naming (U-5)", () => {
   test("three workspaces on one branch read differently once they hold different agents", () => {
     const label = (agentTitle: string) => workspaceRowLabel({ customTitle: workspaceCustomTitle({ title: null, branch: "main" }), name: "main", singleAgent: true, agentTitle });
     assert.deepEqual(["A", "B", "C"].map(label), ["A", "B", "C"]);
+  });
+});
+
+describe("reorderSection: one host's section at a time", () => {
+  const key = (host: string, root: string) => projectOrderKey(host, root);
+  const [A1, HA, A2, B1, B2] = [key("A", "/a1"), key("A", "/h"), key("A", "/a2"), key("B", "/b1"), key("B", "/b2")];
+  const hiddenOf = (...keys: string[]) => new Set(keys);
+
+  test("orderKeyHost and sectionSaved read the host a key names", () => {
+    assert.equal(orderKeyHost(A1), "A");
+    assert.equal(orderKeyHost("/legacy/root"), null);
+    assert.equal(orderKeyHost("[odd folder"), null);
+    assert.deepEqual(sectionSaved([A1, B1, A2, "/legacy"], "A"), [A1, A2]);
+    assert.deepEqual(sectionSaved([A1, B1], null), [A1, B1], "no sections: the whole list");
+  });
+
+  test("repro: saved [A1,H(A),A2,B1,B2], H hidden, B2 moved up in B -> [A1,H,A2,B2,B1]", () => {
+    const saved = [A1, HA, A2, B1, B2];
+    const next = move([B1, B2], sectionSaved(saved, "B"), B2, -1);
+    assert.deepEqual(reorderSection(saved, next, "B", hiddenOf(HA)), [A1, HA, A2, B2, B1]);
+  });
+
+  test("the same through a drag (placeAt)", () => {
+    const saved = [A1, HA, A2, B1, B2];
+    const next = placeAt([B1, B2], sectionSaved(saved, "B"), B2, 0);
+    assert.deepEqual(reorderSection(saved, next, "B", hiddenOf(HA)), [A1, HA, A2, B2, B1]);
+  });
+
+  test("reordering A's shown projects keeps A's hidden slot and leaves B alone", () => {
+    const saved = [A1, HA, A2, B1, B2];
+    const viaMove = reorderSection(saved, move([A1, A2], sectionSaved(saved, "A"), A2, -1), "A", hiddenOf(HA));
+    assert.deepEqual(viaMove, [A2, HA, A1, B1, B2]);
+    const viaDrag = reorderSection(saved, placeAt([A1, A2], sectionSaved(saved, "A"), A2, 0), "A", hiddenOf(HA));
+    assert.deepEqual(viaDrag, viaMove);
+  });
+
+  test("other hosts' hidden keys keep their slots too", () => {
+    const HB = key("B", "/hb");
+    const saved = [B1, HB, B2, A1, HA, A2];
+    const out = reorderSection(saved, move([A1, A2], sectionSaved(saved, "A"), A2, -1), "A", hiddenOf(HA, HB));
+    assert.deepEqual(out, [B1, HB, B2, A2, HA, A1]);
+    const inB = reorderSection(saved, move([B1, B2], sectionSaved(saved, "B"), B2, -1), "B", hiddenOf(HA, HB));
+    assert.deepEqual(inB, [B2, HB, B1, A1, HA, A2]);
+  });
+
+  test("a project new to the saved order goes to the front of its section, where it is shown", () => {
+    const fresh = key("B", "/new");
+    const saved = [A1, B1];
+    assert.deepEqual(reorderSection(saved, [fresh, B1], "B", hiddenOf()), [A1, fresh, B1]);
+    assert.deepEqual(reorderSection([A1], [fresh], "B", hiddenOf()), [A1, fresh], "an unseen section is appended");
+    assert.deepEqual(reorderSection([], [fresh, B1], "B", hiddenOf()), [fresh, B1]);
+  });
+
+  test("host null (no sections) is exactly keepHiddenSlots", () => {
+    const saved = ["a", "H", "b", "c"];
+    for (const next of [["b", "a", "c"], ["c", "b", "a"], ["a", "b", "c", "n"]]) {
+      assert.deepEqual(reorderSection(saved, next, null, hiddenOf("H")), keepHiddenSlots(next, saved, hiddenOf("H")));
+    }
+    assert.deepEqual(reorderSection(saved, ["b", "a", "c"], null, hiddenOf("H")), ["b", "H", "a", "c"]);
+  });
+
+  test("legacy root-only keys belong to no host section and are never moved by one", () => {
+    const saved = ["/legacy", A1, B1, A2];
+    assert.deepEqual(reorderSection(saved, [A2, A1], "A", hiddenOf()), ["/legacy", A2, B1, A1]);
+  });
+
+  test("every key appears once and nothing is lost", () => {
+    const saved = [A1, HA, A2, B1, B2];
+    const out = reorderSection(saved, [B2, B1, key("B", "/n")], "B", hiddenOf(HA));
+    assert.equal(new Set(out).size, out.length);
+    for (const k of saved) assert.ok(out.includes(k), k);
+  });
+});
+
+describe("the other-host hide notices are gone", () => {
+  test("hideOtherHost and hideHostUnknown appear nowhere in the shipped code or strings", () => {
+    const files = [...readdirSync(".", { recursive: true, encoding: "utf8" })]
+      .filter((f) => /^(client|server|shared)\//.test(f) && /\.(ts|tsx)$/.test(f))
+      .concat(["index.client.tsx", "index.server.ts"]);
+    assert.ok(files.length > 50);
+    for (const file of files) assert.doesNotMatch(readFileSync(file, "utf8"), /hideOtherHost|hideHostUnknown/, file);
+  });
+
+  test("every language of the sidebar strings still has the hide keys it uses", async () => {
+    const { sidebarText } = await import("../client/sidebar-strings.ts");
+    const keys = ["hide", "hideTitle", "hideBody", "hideConfirm", "hiding", "hideFailed", "unhide", "unhideFailed", "hiddenProjects", "hiddenMissing", "orderFailed"];
+    for (const key of keys) assert.ok((sidebarText.message as Any)(key, { n: 1, id: "x", name: "x" }), key);
   });
 });
