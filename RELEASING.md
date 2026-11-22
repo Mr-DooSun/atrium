@@ -79,7 +79,7 @@ $PASEO plugin logs atrium-dev                   # Plugin ready 확인
 
 ### 격리 데몬
 
-관리 설치와 웹 UI 검증은 실사용 데몬(`~/.paseo`, 포트 6767)과 분리해서 진행한다. `paseo daemon start`의 수신 주소는 격리 홈의 `config.json`에 지정한다. 이 예에서는 데몬이 6791을 사용한다. `features.webUi.enabled`로 데몬의 내장 웹 UI를 켠다. 별도 정적 서버를 쓰는 경우를 위해 `daemon.cors.allowedOrigins`에는 웹 서버의 origin도 등록한다.
+관리 설치와 웹 UI 검증은 실사용 데몬(`~/.paseo`, 포트 6767)과 분리해서 진행한다. `paseo daemon start`에는 `--port` 옵션이 없으므로 수신 주소는 격리 홈의 `config.json`에 지정한다. 이 예에서는 데몬이 6791을 사용한다. `features.webUi.enabled`로 데몬의 내장 웹 UI를 켠다. 별도 정적 서버를 쓰는 경우를 위해 `daemon.cors.allowedOrigins`에는 웹 서버의 origin도 등록한다.
 
 ```bash
 PASEO=/Applications/Paseo.app/Contents/Resources/bin/paseo
@@ -113,7 +113,7 @@ PASEO_HOME="$DIR" "$PASEO" plugin ls --host "127.0.0.1:$PORT"
 ```
 
 - 같은 데몬에 Atrium을 두 번 설치하면 사용량 소스가 겹친다. 다시 설치하기 전에 격리 데몬에서 `plugin remove`로 앞선 설치를 지운다.
-- 여러 호스트를 재현하려면 서로 다른 임시 홈과 포트에서 격리 데몬 두 개를 띄운다. `"$PASEO" --host "127.0.0.1:$PORT_A" host add "127.0.0.1:$PORT_B" --label test-host-b`로 A에 B를 붙인 뒤 A의 웹 UI를 연다.
+- 여러 호스트를 재현하려면 서로 다른 임시 홈과 포트에서 격리 데몬 두 개를 띄운다. 두 포트를 각각 `PORT_A`, `PORT_B`에 지정한 뒤 `"$PASEO" --host "127.0.0.1:$PORT_A" host add "127.0.0.1:$PORT_B" --label test-host-b`로 A에 B를 붙인 뒤 A의 웹 UI를 연다.
 - 새 비공개 브라우저 창에서 내장 웹 UI(`http://127.0.0.1:6791/`)를 연다. 설정 → 사이드바 → 보기에서 Atrium을 고른다.
 
 #### 별도 정적 웹 서버로 확인하기
