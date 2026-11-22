@@ -1,14 +1,15 @@
 // One chat column: header (provider, title, status, actions) over the agent's timeline.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, PanResponder, Platform, Pressable, Text, View, type GestureResponderEvent, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
-import { useAgent, useHosts, usePaseo, useRpc, useSubscription, useTranslation, type AgentRef } from "@getpaseo/plugin/client";
+import { useAgent, useHosts, useRpc, useSubscription, useTranslation, useWorkspace, type AgentRef, type WorkspaceRef } from "@getpaseo/plugin/client";
 import { FlatList, Icon, Markdown, TextInput, useToast } from "@getpaseo/plugin/client/ui";
-import { chatOlder, chatTimelines, type ChatItem } from "../../shared/chat/rpc";
+import { chatOlder, chatSend, chatTimelines, type ChatItem } from "../../shared/chat/rpc";
 import { panesText } from "../chat-strings";
 import { TITLE_LINE, type Palette } from "../look";
 import { ProviderMark, StatusMark, agentBucket, isAgentTurnActive } from "../marks";
 import { readableOn } from "./layout";
-import { applyOlder, applyTimelineEvent, clearTimelineError, displayItems, errorBanner, AUTO_RETRY_DELAY_MS, armAutoRetry, autoRetryDue, rowWording, type AgentTimeline, type Timelines } from "./timeline";
+import { applyOlder, applyTimelineEvent, clearTimelineError, displayItems, errorBanner, AUTO_RETRY_DELAY_MS, armAutoRetry, autoRetryDue, rowWording, unavailableReason, type AgentTimeline, type Timelines, type UnavailableReason } from "./timeline";
+import { paneGone, paneTitle, showHostRefused } from "./pane-state";
 
 export interface PaneLink {
   /** Family color shared by every pane of the family. */
@@ -20,6 +21,9 @@ export interface PaneLink {
   depth: number;
   /** The nearest open ancestor, for the "sub-agent of" line. */
   parent: AgentRef | null;
+  /** Whether the family block has another block on that side to swap with. */
+  canMoveLeft: boolean;
+  canMoveRight: boolean;
 }
 
 export interface PaneProps {
@@ -30,6 +34,8 @@ export interface PaneProps {
   link: PaneLink;
   /** Set when the agent lives on another host than the plugin's: its timeline can't load here. */
   otherHost?: string | null;
+  /** The agent has a permission request open (the sidebar's source, not the snapshot alone). */
+  waitingPermission?: boolean;
   onClose(agent: AgentRef): void;
   onOpen(agent: AgentRef): void;
   onMoveFamily(agent: AgentRef, delta: -1 | 1): void;
@@ -69,6 +75,7 @@ export const Pane = memo(function Pane({
   p,
   link,
   otherHost,
+  waitingPermission = false,
   onClose,
   onOpen,
   onMoveFamily,
@@ -84,7 +91,25 @@ export const Pane = memo(function Pane({
     requiresAttention: a.requiresAttention,
     attentionReason: a.attentionReason,
   }), shallowEqual);
-  const title = info?.title || t("untitled");
+  // Gone from the host's snapshot (archived, or its workspace or project removed), or the server
+  // refused a message for that reason: the pane stays readable but takes no input.
+  const missing = useMissingAgent(agent, info !== null);
+  const [refused, setRefused] = useState<UnavailableReason | null>(null);
+  // The server could not confirm the agent is on its host (host_unknown / host_mismatch): nothing
+  // was sent, and the source chat on the agent's own host is the way on.
+  const [hostRefused, setHostRefused] = useState(false);
+  const gone = paneGone({ refused, present: info !== null, missing });
+  // The title it had while it was in the snapshot, so an archived pane keeps its name; a pane
+  // restored after a reload never saw one and says what state it is in instead.
+  const lastTitle = useRef<string | null>(null);
+  if (info?.title) lastTitle.current = info.title;
+  const title = paneTitle({
+    gone,
+    title: info?.title,
+    lastTitle: lastTitle.current,
+    untitled: t("untitled"),
+    goneTitles: { archived: t("goneArchivedTitle"), removed: t("goneTitle") },
+  });
   const linked = link.size > 1;
   const first = link.index === 0;
   const last = link.index === link.size - 1;
@@ -132,31 +157,42 @@ export const Pane = memo(function Pane({
         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: p.guide }}>
           {reorder ? <DragGrip agent={agent} handlers={reorder} label={first ? t("dragFamily") : t("drag")} p={p} /> : null}
           <View style={{ paddingLeft: Math.min(link.depth, 4) * 6 }}>
-            <ProviderMark provider={info?.provider ?? ""} p={p} />
+            {gone ? (
+              <View style={{ width: 16, height: TITLE_LINE, alignItems: "center", justifyContent: "center" }}>
+                <Icon name="Archive" size={13} color={p.muted} />
+              </View>
+            ) : (
+              <ProviderMark provider={info?.provider ?? ""} p={p} />
+            )}
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text numberOfLines={1} style={{ color: p.foreground, fontSize: 14, lineHeight: TITLE_LINE, fontWeight: "600" }}>
+            <Text numberOfLines={1} style={{ color: gone ? p.muted : p.foreground, fontSize: 14, lineHeight: TITLE_LINE, fontWeight: "600", textAlign: "left" }}>
               {title}
             </Text>
+            {info ? <PlaceLine agent={agent} p={p} /> : null}
             {link.parent ? <ParentLine parent={link.parent} p={p} /> : null}
           </View>
-          {info ? <StatusMark bucket={agentBucket(info)} p={p} /> : null}
+          {info && !gone ? <StatusMark bucket={agentBucket(info, waitingPermission)} p={p} /> : null}
           {first ? (
             <>
-              <HeaderButton icon="ChevronLeft" label={t("moveLeft")} p={p} onPress={() => onMoveFamily(agent, -1)} />
-              <HeaderButton icon="ChevronRight" label={t("moveRight")} p={p} onPress={() => onMoveFamily(agent, 1)} />
+              <HeaderButton icon="ChevronLeft" label={t("moveLeft")} p={p} disabled={!link.canMoveLeft} onPress={() => onMoveFamily(agent, -1)} />
+              <HeaderButton icon="ChevronRight" label={t("moveRight")} p={p} disabled={!link.canMoveRight} onPress={() => onMoveFamily(agent, 1)} />
             </>
           ) : null}
           <HeaderButton icon="ExternalLink" label={t("openInPaseo")} p={p} onPress={() => onOpen(agent)} />
           <HeaderButton icon="X" label={t("close")} p={p} onPress={() => onClose(agent)} />
         </View>
+        {showHostRefused(hostRefused, gone) ? <HostRefusedBanner onOpen={() => onOpen(agent)} onDismiss={() => setHostRefused(false)} p={p} /> : null}
+        {info && !gone && agentBucket(info, waitingPermission) === "needs_input" ? (
+          <PermissionBanner onOpen={() => onOpen(agent)} p={p} />
+        ) : null}
         {otherHost ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16, gap: 8 }}>
             <Icon name="ServerOff" size={20} color={p.muted} />
             <Text style={{ color: p.muted, fontSize: 12, textAlign: "center" }}>{t("otherHost", { host: otherHost })}</Text>
           </View>
         ) : (
-          <PaneBody agent={agent} p={p} />
+          <PaneBody agent={agent} p={p} gone={gone} onUnavailable={setRefused} onHostRefused={() => setHostRefused(true)} />
         )}
       </View>
       {onResize ? <ResizeHandle agent={agent} width={width} gap={gap} onResize={onResize} label={t("resize")} p={p} /> : null}
@@ -309,12 +345,34 @@ function ResizeHandle({
   );
 }
 
+/**
+ * Project and workspace under the title, as the sidebar names them, so a pane (titled after its
+ * agent) can be matched to its sidebar row (titled after its workspace). Only mounted while the
+ * agent is in the snapshot.
+ */
+function PlaceLine({ agent, p }: { agent: AgentRef; p: Palette }) {
+  const workspace = useAgent(agent, (a) => a.workspace);
+  return workspace ? <WorkspacePlace workspace={workspace} p={p} /> : null;
+}
+
+function WorkspacePlace({ workspace, p }: { workspace: WorkspaceRef; p: Palette }) {
+  const place = useWorkspace(workspace, (w) => ({ project: w.projectDisplayName, name: w.title ?? w.name }), shallowEqual);
+  if (!place) return null;
+  const parts = [place.project, place.name].filter((part, i, all) => part && all.indexOf(part) === i);
+  if (parts.length === 0) return null;
+  return (
+    <Text numberOfLines={1} style={{ color: p.muted, fontSize: 11, textAlign: "left" }}>
+      {parts.join(" · ")}
+    </Text>
+  );
+}
+
 /** Only mounted when the agent has a parent pane, so useAgent never sees an empty ref. */
 function ParentLine({ parent, p }: { parent: AgentRef; p: Palette }) {
   const { t } = useTranslation(panesText);
   const title = useAgent(parent, (a) => a.title);
   return (
-    <Text numberOfLines={1} style={{ color: p.muted, fontSize: 11 }}>
+    <Text numberOfLines={1} style={{ color: p.muted, fontSize: 11, textAlign: "left" }}>
       {"↳ "}
       {t("childOf", { title: title || t("untitled") })}
     </Text>
@@ -325,7 +383,13 @@ function ParentLine({ parent, p }: { parent: AgentRef; p: Palette }) {
  * The live part of an own-host pane: its own `chatTimelines` subscription (so scrolling only
  * adds or removes this one), its rows (dropped when the pane unmounts), and the composer.
  */
-function PaneBody(props: { agent: AgentRef; p: Palette }) {
+function PaneBody(props: {
+  agent: AgentRef;
+  p: Palette;
+  gone: UnavailableReason | null;
+  onUnavailable(reason: UnavailableReason): void;
+  onHostRefused(): void;
+}) {
   // Retry = remount: a fresh subscription, without touching the input schema. The rows live here,
   // above the remount, so older pages already loaded survive a retry: the new snapshot has the
   // same epoch and is stitched onto them (applyTimelineEvent).
@@ -351,12 +415,18 @@ function PaneBody(props: { agent: AgentRef; p: Palette }) {
 function LiveBody({
   agent,
   p,
+  gone,
+  onUnavailable,
+  onHostRefused,
   state,
   update: setState,
   onRetry,
 }: {
   agent: AgentRef;
   p: Palette;
+  gone: UnavailableReason | null;
+  onUnavailable(reason: UnavailableReason): void;
+  onHostRefused(): void;
   state: Timelines;
   /** Changes the rows, unless this body's generation was replaced by a retry. */
   update(change: (prev: Timelines) => Timelines): void;
@@ -477,7 +547,7 @@ function LiveBody({
             }
           />
         )}
-      <Composer agent={agent} p={p} />
+      {gone ? <GoneNotice reason={gone} p={p} /> : <Composer agent={agent} p={p} onUnavailable={onUnavailable} onHostRefused={onHostRefused} />}
     </>
   );
 }
@@ -498,28 +568,126 @@ function TextButton({ label, onPress, p }: { label: string; onPress(): void; p: 
 /** react-native-web passes these DOM KeyboardEvent fields through on `nativeEvent`. */
 type KeyPress = TextInputKeyPressEventData & { shiftKey?: boolean; isComposing?: boolean; keyCode?: number };
 
-function Composer({ agent, p }: { agent: AgentRef; p: Palette }) {
+/**
+ * The agent waits on a permission request. Panes cannot answer one (Paseo's chat can), so say so
+ * plainly, in the sidebar's color for the same state, with the way to answer it.
+ */
+function PermissionBanner({ onOpen, p }: { onOpen(): void; p: Palette }) {
   const { t } = useTranslation(panesText);
-  const paseo = usePaseo();
+  return (
+    <View
+      accessibilityRole="alert"
+      style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: p.guide }}
+    >
+      <Icon name="CircleAlert" size={14} color={p.warning} />
+      <Text style={{ flex: 1, color: p.foreground, fontSize: 12, lineHeight: 17 }}>{t("permissionWaiting")}</Text>
+      <TextButton label={t("permissionAnswer")} onPress={onOpen} p={p} />
+    </View>
+  );
+}
+
+/** The server would not send because it could not place the agent on its own host. */
+function HostRefusedBanner({ onOpen, onDismiss, p }: { onOpen(): void; onDismiss(): void; p: Palette }) {
+  const { t } = useTranslation(panesText);
+  return (
+    <View
+      accessibilityRole="alert"
+      style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: p.guide }}
+    >
+      <Icon name="ServerOff" size={14} color={p.warning} />
+      <Text style={{ flex: 1, color: p.foreground, fontSize: 12, lineHeight: 17 }}>{t("hostRefused")}</Text>
+      <TextButton label={t("openInPaseo")} onPress={onOpen} p={p} />
+      <HeaderButton icon="X" label={t("close")} p={p} onPress={onDismiss} />
+    </View>
+  );
+}
+
+/** In place of the composer once the session is gone: history stays, input does not. */
+function GoneNotice({ reason, p }: { reason: UnavailableReason; p: Palette }) {
+  const { t } = useTranslation(panesText);
+  return (
+    <View
+      accessibilityRole="text"
+      style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10, borderTopWidth: 1, borderTopColor: p.guide }}
+    >
+      <Icon name="Archive" size={14} color={p.muted} />
+      <Text style={{ flex: 1, color: p.muted, fontSize: 12, lineHeight: 17 }}>
+        {t(reason === "archived" ? "goneArchivedNotice" : "goneNotice")}
+      </Text>
+    </View>
+  );
+}
+
+/** How long a pane waits, with its host online, before taking a missing agent as gone. */
+const MISSING_GRACE_MS = 3000;
+
+/**
+ * True once the agent has been absent from its host's snapshot for a while with the host online.
+ * Right after (re)connecting the snapshot can still be filling in, so absence alone is not enough.
+ */
+function useMissingAgent(agent: AgentRef, present: boolean): boolean {
+  const online = useHosts().find((h) => h.serverId === agent.hostId)?.status === "online";
+  const [missing, setMissing] = useState(false);
+  useEffect(() => {
+    setMissing(false);
+    if (present || !online) return;
+    const timer = setTimeout(() => setMissing(true), MISSING_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [present, online]);
+  return missing && !present && online;
+}
+
+function Composer({
+  agent,
+  p,
+  onUnavailable,
+  onHostRefused,
+}: {
+  agent: AgentRef;
+  p: Palette;
+  onUnavailable(reason: UnavailableReason): void;
+  onHostRefused(): void;
+}) {
+  const { t } = useTranslation(panesText);
+  const sendChat = useRpc(chatSend);
   const working = useAgent(agent, (a) => isAgentTurnActive(a.status)) ?? false;
   const toast = useToast();
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const canSend = text.trim().length > 0 && !sending;
 
+  // Every pane message goes through chat.send: the server checks the agent, its workspace and its
+  // project before sending, so an archived or orphaned agent can't be woken from here (U-4).
+  // Panes send plain text and always steer, never interrupt: a side pane must not cut off a running
+  // turn. Attachments and interrupting need Paseo's own chat.
   const send = () => {
     if (!canSend) return;
     const message = text;
     setSending(true);
-    paseo.agents
-      .ref(agent)
-      // Steer, never interrupt: a side pane must not cut off a running turn (the daemon
-      // interrupts when this is omitted).
-      .send(message, { activeTurnBehavior: "steer" })
-      .then(() => setText((cur) => (cur === message ? "" : cur)))
+    sendChat({ agentId: agent.id, hostId: agent.hostId, text: message })
+      .then((answer) => {
+        if (answer.ok) {
+          setText((cur) => (cur === message ? "" : cur));
+          return;
+        }
+        const reason = unavailableReason(answer);
+        if (reason) {
+          onUnavailable(reason);
+          return;
+        }
+        if (answer.error.code === "agent_unavailable") {
+          // host_unknown / host_mismatch: the text stays in the box for the source chat.
+          onHostRefused();
+          return;
+        }
+        console.warn(`[atrium] chat pane ${agent.id}: send refused (${answer.error.code}): ${answer.error.message}`);
+        toast.error(t("sendFailed"));
+      })
       .catch((error: unknown) => {
         console.warn(`[atrium] chat pane ${agent.id}: send failed`, error);
-        toast.error(t("sendFailed"));
+        const reason = unavailableReason(error);
+        if (reason) onUnavailable(reason);
+        else toast.error(t("sendFailed"));
       })
       .finally(() => setSending(false));
   };
@@ -583,12 +751,15 @@ function Composer({ agent, p }: { agent: AgentRef; p: Palette }) {
   );
 }
 
-function HeaderButton({ icon, label, p, onPress }: { icon: string; label: string; p: Palette; onPress(): void }) {
+function HeaderButton({ icon, label, p, onPress, disabled = false }: { icon: string; label: string; p: Palette; onPress(): void; disabled?: boolean }) {
   const [hovered, setHovered] = useState(false);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      aria-disabled={disabled}
+      disabled={disabled}
       hitSlop={4}
       onPress={onPress}
       onPointerEnter={() => setHovered(true)}
@@ -599,7 +770,8 @@ function HeaderButton({ icon, label, p, onPress }: { icon: string; label: string
         borderRadius: 5,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: pressed ? p.pressed : hovered ? p.hover : "transparent",
+        backgroundColor: disabled ? "transparent" : pressed ? p.pressed : hovered ? p.hover : "transparent",
+        opacity: disabled ? 0.35 : 1,
       })}
     >
       <Icon name={icon} size={13} color={p.muted} />
@@ -609,6 +781,20 @@ function HeaderButton({ icon, label, p, onPress }: { icon: string; label: string
 
 const Row = memo(function Row({ item, p }: { item: ChatItem; p: Palette }) {
   const { t } = useTranslation(panesText);
+  if (item.kind === "user" && item.senderName) {
+    // An instruction another agent sent (agent_message): who sent it, over the text, on the left,
+    // so a sub-agent's pane shows what it was asked to do and by whom.
+    return (
+      <View style={{ alignSelf: "flex-start", maxWidth: "88%", marginVertical: 4, gap: 2 }}>
+        <Text numberOfLines={1} style={{ color: p.muted, fontSize: 11, fontWeight: "600", textAlign: "left" }}>
+          {t("fromSender", { name: item.senderName })}
+        </Text>
+        <View style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1, borderColor: p.guide }}>
+          <Text selectable style={{ color: p.foreground, fontSize: 13, lineHeight: 19 }}>{item.text}</Text>
+        </View>
+      </View>
+    );
+  }
   if (item.kind === "user") {
     return (
       <View style={{ alignSelf: "flex-end", maxWidth: "88%", marginVertical: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: p.hover }}>

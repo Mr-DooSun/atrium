@@ -113,7 +113,10 @@ function McpBody({ hostId, params }: { hostId: string; params: Record<string, st
           refreshing={refreshing}
         />
       ) : null}
-      {ofKind.length > 0 ? <ScopeBasis cwd={cwd} /> : null}
+      {/* Which project the lists are for only matters to a CLI with project scopes that is installed. */}
+      {MCP_SCOPES[activeTab].length > 0 && (all ? ofKind : profile ? [profile] : []).some((x) => x.auth.state !== "not_installed") ? (
+        <ScopeBasis cwd={cwd} />
+      ) : null}
       {all ? <AllServers key={`all:${activeTab}`} profiles={ofKind} cwd={cwd} flow={flow} /> : null}
       {profile ? <ProfileServers key={profile.id} profile={profile} cwd={cwd} flow={flow} /> : null}
       {flow.element}
@@ -166,6 +169,7 @@ function ProfileServers({ profile, cwd, flow }: { profile: Profile; cwd: string 
     setFormOpen(false);
     flow.start({
       title: t.mcp.form.title,
+      details: mcpAddDetails(server, t),
       subject: `${profile.label} · ${server.name}`,
       bringsCode: true,
       preview: () => preview({ profileId: profile.id, cwd, server }),
@@ -183,6 +187,7 @@ function ProfileServers({ profile, cwd, flow }: { profile: Profile; cwd: string 
     flow.start({
       title: t.mcp.removeTitle,
       subject: `${profile.label} · ${server.name}`,
+      details: mcpEntryDetails(t, profile.kind, server),
       destructive: true,
       preview: null,
       localWarnings:
@@ -196,6 +201,7 @@ function ProfileServers({ profile, cwd, flow }: { profile: Profile; cwd: string 
     flow.start({
       title: t.mcp.loginTitle,
       subject: `${profile.label} · ${server.name}`,
+      details: mcpEntryDetails(t, profile.kind, server),
       preview: null,
       localWarnings: [t.mcp.loginWarning],
       run: () => login({ profileId: profile.id, cwd, name: server.name }),
@@ -429,7 +435,13 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
     const targets = ofKind
       .filter((x) => x.auth.state === "logged_in" && (!from || (state.get(x.id) === "ok" && !from.row.entries.has(x.id))))
       .map((x) => x.id);
-    setBulk({ kind, form: from ? formFrom(from.server, kind, cwd) : emptyForm(kind, cwd), targets, from: from?.row ?? null });
+    // A plain "add" reopens what was typed last for this kind (cancelled at the preview, say), like
+    // the single-profile form; it is dropped once an add succeeds. Copying a row always starts fresh.
+    setBulk((cur) =>
+      !from && cur && cur.kind === kind && !cur.from
+        ? cur
+        : { kind, form: from ? formFrom(from.server, kind, cwd) : emptyForm(kind, cwd), targets, from: from?.row ?? null },
+    );
     setFormOpen(true);
   };
 
@@ -447,6 +459,7 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
       const via = chosen[0];
       flow.start({
         title: t.mcp.form.title,
+        details: mcpAddDetails(server, t),
         subject: `${t.scope.projectShared} · ${server.name}`,
         bringsCode: true,
         localWarnings: [t.scope.sharedOnce(via.label)],
@@ -463,6 +476,7 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
     }
     flow.startBulk({
       title: t.mcp.form.title,
+      details: mcpAddDetails(server, t),
       subject: server.name,
       bringsCode: true,
       pick: false,
@@ -489,6 +503,7 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
     flow.start({
       title: t.mcp.loginTitle,
       subject: `${profile.label} · ${server.name}`,
+      details: mcpEntryDetails(t, profile.kind, server),
       preview: null,
       localWarnings: [t.mcp.loginWarning],
       run: () => login({ profileId: profile.id, cwd, name: server.name }),
@@ -505,6 +520,7 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
       flow.start({
         title: t.mcp.removeTitle,
         subject: `${t.mcp.shared} · ${row.name}`,
+        details: mcpEntryDetails(t, via.kind, entry),
         destructive: true,
         preview: null,
         localWarnings: [t.mcp.sharedRemoveWarning],
@@ -515,9 +531,11 @@ function AllServers({ profiles, cwd, flow }: { profiles: readonly Profile[]; cwd
       return;
     }
     const userLevel = cwd === null && [...row.entries.values()].some((s) => s.scope === null);
+    // Profiles can differ in where and what the entry is; the target list shows them per profile.
     flow.startBulk({
       title: t.mcp.removeTitle,
       subject: row.name,
+      details: [{ label: t.mcp.form.name, value: row.name }],
       destructive: true,
       pick: true,
       localWarnings: userLevel ? [t.mcp.removeWarning, t.mcp.removeUserLevel] : [t.mcp.removeWarning],
@@ -743,6 +761,50 @@ function toInput(form: McpForm): McpAddInput {
   };
 }
 
+/**
+ * Which entry a remove or login acts on, for confirmations that have no CLI preview (the server
+ * has no preview RPC for them, so the exact command only shows in the result): the name, where it
+ * is configured, and what it connects to. Never env or header values (the list doesn't carry them).
+ */
+function mcpEntryDetails(
+  t: ReturnType<typeof useToolboxText>,
+  kind: ProviderKind,
+  server: Pick<McpServer, "name" | "scope" | "transport" | "target">,
+): { label: string; value: string }[] {
+  const details = [
+    { label: t.mcp.form.name, value: server.name },
+    { label: t.mcp.form.scope, value: mcpScopeLabel(t, kind, server) },
+  ];
+  if (server.transport) details.push({ label: t.mcp.form.transport, value: server.transport });
+  if (server.target) details.push({ label: server.transport === "stdio" ? t.mcp.form.command : t.mcp.form.url, value: server.target });
+  return details;
+}
+
+/**
+ * What an MCP add writes, as entered, for the confirmation: the CLI preview only shows
+ * `mcp add-json … <name> -`, the configuration itself goes in on stdin. Values of environment
+ * variables and headers are left out (names only); they are secrets.
+ */
+function mcpAddDetails(server: McpAddInput, t: ReturnType<typeof useToolboxText>): { label: string; value: string }[] {
+  const details = [
+    { label: t.mcp.form.transport, value: server.transport },
+    { label: server.transport === "stdio" ? t.mcp.form.command : t.mcp.form.url, value: [server.target, ...server.args].join(" ") },
+  ];
+  const env = Object.keys(server.env);
+  if (env.length > 0) details.push({ label: t.mcp.form.env, value: env.map((k) => `${k}=•••`).join("\n") });
+  const headers = Object.keys(server.headers);
+  if (headers.length > 0) details.push({ label: t.mcp.form.headers, value: headers.map((k) => `${k}: •••`).join("\n") });
+  return details;
+}
+
+/**
+ * A name every supported CLI takes as one plain word: the Codex rule (the strictest), capped. It is
+ * passed as its own argument, so this is about clear errors before the preview, not injection.
+ */
+export function mcpNameOk(name: string): boolean {
+  return /^[A-Za-z0-9_@][A-Za-z0-9_:@/.-]{0,63}$/.test(name.trim());
+}
+
 function AddServerModal({
   open,
   kind,
@@ -770,13 +832,20 @@ function AddServerModal({
   const { p } = useLook();
   const set = <K extends keyof McpForm>(key: K, value: McpForm[K]) => onChange({ ...form, [key]: value });
   const stdio = form.transport === "stdio";
-  const nameOk = form.name.trim().length > 0;
+  const nameShaped = mcpNameOk(form.name);
+  const nameOk = form.name.trim().length > 0 && nameShaped;
   const targetOk = form.target.trim().length > 0;
+  // In words, as the server lists show them; the CLI's own name (local/project/user) is the value.
   const scopeOptions = MCP_SCOPES[kind].map((s) => ({
     value: s,
-    label: s,
+    label: mcpScopeLabel(t, kind, { scope: s, name: "" }),
     disabled: !cwd && PROJECT_SCOPES.includes(s),
   }));
+  const scopeNow = form.scope ?? scopeOptions[0]?.value ?? null;
+  const scopeHelp = scopeNow === "local" ? t.mcp.form.scopeHelpLocal
+    : scopeNow === "project" ? t.mcp.form.scopeHelpProject
+    : scopeNow === "user" ? t.mcp.form.scopeHelpUser
+    : null;
   const scopeBlocked = !cwd && form.scope !== null && PROJECT_SCOPES.includes(form.scope);
   const noTargets = targets ? targets.selected.length === 0 : false;
 
@@ -800,10 +869,14 @@ function AddServerModal({
         ) : null}
         <FormField label={t.mcp.form.name}>
           <Input value={form.name} onChangeText={(v) => set("name", v)} placeholder={t.mcp.form.namePlaceholder} />
+          {form.name.trim() && !nameShaped ? (
+            <Text style={{ color: p.danger, fontSize: 11, lineHeight: 16 }}>{t.mcp.form.invalidNameChars}</Text>
+          ) : null}
         </FormField>
         {scopeOptions.length > 0 ? (
           <FormField label={t.mcp.form.scope}>
             <Segmented value={form.scope ?? scopeOptions[0].value} options={scopeOptions} onChange={(v) => set("scope", v)} />
+            {scopeHelp ? <Text style={{ color: p.muted, fontSize: 11, lineHeight: 16 }}>{scopeHelp}</Text> : null}
             {!cwd && scopeOptions.some((o) => o.disabled) ? (
               <Text style={{ color: p.muted, fontSize: 11, lineHeight: 16 }}>{t.mcp.form.scopeNeedsProject}</Text>
             ) : null}

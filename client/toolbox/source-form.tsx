@@ -1,7 +1,7 @@
 // "Install from source": a git repo, npm package, local folder or a marketplace plus plugin name,
 // for plugins the catalog does not list. The form only collects; the preview → confirm → run flow
 // shows the exact command before anything is fetched.
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { Icon, Modal, TextInput } from "@getpaseo/plugin/client/ui";
 import { ECOSYSTEM_CAPS, type Ecosystem, type PluginSourceInput, type PluginSourceKind } from "../../shared/toolbox/types";
@@ -13,13 +13,18 @@ export function SourceInstallModal({
   ecosystem,
   cwd,
   where,
+  draft,
+  onDraft,
   onClose,
   onSubmit,
 }: {
   ecosystem: Ecosystem;
   cwd: string | null;
-  /** Profile label or "Paseo", shown under the title. */
+  /** Profile label, shown under the title. */
   where: string;
+  /** The last values typed here, restored when the form opens again. */
+  draft?: SourceForm | null;
+  onDraft?(form: SourceForm): void;
   onClose(): void;
   onSubmit(source: PluginSourceInput): void;
 }) {
@@ -28,16 +33,17 @@ export function SourceInstallModal({
   const caps = ECOSYSTEM_CAPS[ecosystem];
   const kinds = caps.sources;
   const scopes = caps.scopes;
-  const [form, setForm] = useState<SourceForm>({
-    kind: kinds[0] ?? "git",
-    value: "",
-    ref: "",
-    version: "",
-    path: "",
-    plugin: "",
-    scope: scopes[0] ?? null,
-  });
+  const [form, setForm] = useState<SourceForm>(() =>
+    draft && kinds.includes(draft.kind) && (draft.scope === null || scopes.includes(draft.scope))
+      ? draft
+      : { kind: kinds[0] ?? "git", value: "", ref: "", version: "", path: "", plugin: "", scope: scopes[0] ?? null },
+  );
   const set = <K extends keyof SourceForm>(key: K, value: SourceForm[K]) => setForm((f) => ({ ...f, [key]: value }));
+  const latestOnDraft = useRef(onDraft);
+  latestOnDraft.current = onDraft;
+  useEffect(() => {
+    latestOnDraft.current?.(form);
+  }, [form]);
   const scopeBlocked = form.scope !== null && PROJECT_SCOPES.includes(form.scope) && !cwd;
   const ok = valueOk(form.kind, form.value) && (form.kind !== "marketplace" || !!form.plugin.trim()) && !scopeBlocked;
   const f = t.plugins.source;

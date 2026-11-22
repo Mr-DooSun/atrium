@@ -1,5 +1,5 @@
-// "/plugins": Paseo's own plugins and each agent CLI's plugins, per profile or for every profile
-// of a kind side by side ("전체"), where actions run on several profiles at once.
+// "/plugins": each agent CLI's plugins, per profile or for every profile of a kind side by side
+// ("전체"), where actions run on several profiles at once. Paseo's own plugins are managed natively.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { keepPreviousData, useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
@@ -40,6 +40,7 @@ import {
   rowFacts,
   trackKey,
   type Facts,
+  type SourceForm,
   type InstalledFilter,
   type InstalledSort,
   type PluginRow,
@@ -97,14 +98,14 @@ export function PluginsScreen({ theme, layout, host, params, navigation }: Plugi
       <LookProvider value={look}>
         <View style={{ flex: 1 }}>
           <BackBar agentId={params.agentId} title={params.agentTitle} hostId={host.id} navigation={navigation} />
-          <PluginsBody hostId={host.id} params={params} />
+          <PluginsBody hostId={host.id} hostLabel={host.label} params={params} />
         </View>
       </LookProvider>
     </ToolboxTextProvider>
   );
 }
 
-function PluginsBody({ hostId, params }: { hostId: string; params: Record<string, string> }) {
+function PluginsBody({ hostId, hostLabel, params }: { hostId: string; hostLabel: string; params: Record<string, string> }) {
   const t = useToolboxText();
   const { query: profilesQuery, refresh, refreshing } = useProfiles();
   const profiles = profilesQuery.data?.profiles ?? [];
@@ -114,17 +115,19 @@ function PluginsBody({ hostId, params }: { hostId: string; params: Record<string
   // A requested profile that is not managed (opencode agent, typo) never falls back silently.
   const unknown = profilesQuery.isSuccess && requested !== null && !profiles.some((x) => x.id === requested);
 
-  // Tab: explicit param first, else the kind of the agent's own profile, else Paseo.
+  // Tab: explicit param first, else the kind of the agent's own profile, else the first managed CLI
+  // (Paseo's own plugins are managed natively, so its tab is only guidance).
   const requestedTab = asEcosystem(params.tab);
   const agentKind = profiles.find((x) => x.id === params.profileId)?.kind ?? null;
   const [tab, setTab] = useState<Ecosystem | null>(requestedTab);
-  const activeTab: Ecosystem = tab ?? agentKind ?? "paseo";
+  const activeTab: Ecosystem = tab ?? agentKind ?? profiles[0]?.kind ?? "claude";
   useEffect(() => {
     if (requestedTab) setTab(requestedTab);
   }, [requestedTab]);
 
   const [picked, setPicked] = useState<Partial<Record<Ecosystem, string>>>({});
-  const ofKind = activeTab === "paseo" ? [] : profiles.filter((x) => x.kind === activeTab);
+  const native = ECOSYSTEM_CAPS[activeTab].management === "native";
+  const ofKind = native ? [] : profiles.filter((x) => x.kind === activeTab);
   // A tab with several accounts opens on "전체" so they are told apart row by row.
   const preferred = picked[activeTab] ?? (ofKind.length > 1 ? ALL_PROFILES : requested);
   const all = preferred === ALL_PROFILES && ofKind.length > 1;
@@ -142,8 +145,10 @@ function PluginsBody({ hostId, params }: { hostId: string; params: Record<string
         onChange={setTab}
       />
       {unknown && requested ? <Notice tone="warning" text={t.profile.unmanaged(requested)} /> : null}
-      {activeTab === "paseo" ? (
-        <EcosystemView key="paseo" ecosystem="paseo" profile={null} cwd={cwd} flow={flow} />
+      {native ? (
+        // Settings > Plugins on the host owns browsing, installing and updating Paseo plugins;
+        // the Toolbox has no operations for it (ECOSYSTEM_CAPS.paseo.management === "native").
+        <EmptyState icon="Puzzle" title={t.plugins.nativeTitle} body={t.plugins.nativeBody(hostLabel)} />
       ) : (
         <>
           {profilesQuery.isPending ? <LoadingLine /> : null}
@@ -163,7 +168,10 @@ function PluginsBody({ hostId, params }: { hostId: string; params: Record<string
               refreshing={refreshing}
             />
           ) : null}
-          {ofKind.length > 0 ? <ScopeBasis cwd={cwd} /> : null}
+          {/* Which project the lists are for only matters to a CLI with project scopes that is installed. */}
+          {ECOSYSTEM_CAPS[activeTab].scopes.length > 0 && (all ? ofKind : profile ? [profile] : []).some((x) => x.auth.state !== "not_installed") ? (
+            <ScopeBasis cwd={cwd} />
+          ) : null}
           {all && ofKind.length > 0 ? (
             <AllPlugins key={`all:${activeTab}`} ecosystem={activeTab} profiles={ofKind} cwd={cwd} flow={flow} />
           ) : null}
@@ -223,8 +231,11 @@ function EcosystemView({
   const previewMarket = useRpc(previewMarketplaceAction);
   const previewSource = useRpc(previewSourceInstall);
   const runSource = useRpc(runSourceInstall);
-  const where = profile ? profile.label : t.plugins.tabs.paseo;
+  const where = profile?.label ?? "";
   const [sourceOpen, setSourceOpen] = useState(false);
+  // What was typed into "Install from source", kept when the form closes (cancel, or a refused
+  // preview) so it can be fixed instead of typed again; dropped after an install succeeds.
+  const [sourceDraft, setSourceDraft] = useState<SourceForm | null>(null);
   // Where catalog installs go, for CLIs with install scopes; project scopes need a project.
   const [installScope, setInstallScope] = useState<string | null>(
     caps.scopes.find((s) => cwd || !PROJECT_SCOPES.includes(s)) ?? null,
@@ -286,6 +297,9 @@ function EcosystemView({
       run: () => runSource(input),
       invalidate: [keys.plugins(ecosystem, profileId)],
       reloadProvider: profileId,
+      onResult: (result) => {
+        if (result.ok) setSourceDraft(null);
+      },
     });
   };
 
@@ -327,7 +341,15 @@ function EcosystemView({
         />
       ) : null}
       {sourceOpen ? (
-        <SourceInstallModal ecosystem={ecosystem} cwd={cwd} where={where} onClose={() => setSourceOpen(false)} onSubmit={startSource} />
+        <SourceInstallModal
+          ecosystem={ecosystem}
+          cwd={cwd}
+          where={where}
+          draft={sourceDraft}
+          onDraft={setSourceDraft}
+          onClose={() => setSourceOpen(false)}
+          onSubmit={startSource}
+        />
       ) : null}
       {section === "marketplaces" ? (
         <MarketplaceList scope={scope} busy={flow.busy} onAction={startMarket} />
@@ -663,7 +685,6 @@ function BrowseList({
   const total = pages[0]?.total ?? items.length;
   const firstError = pages[0]?.error ?? null;
   const facets = pages[0]?.categories ?? [];
-  const catalogSource = scope.ecosystem === "paseo" ? pages[0]?.marketplaces[0]?.name : undefined;
   // The opened plugin follows refetches (installed flag, update) while its sheet is up.
   const [openKey, setOpenKey] = useState<{ key: string; snapshot: CatalogPlugin } | null>(null);
   const keyOf = (plugin: CatalogPlugin) => `${plugin.marketplace ?? ""}:${plugin.id}`;
@@ -680,7 +701,7 @@ function BrowseList({
       key={keyOf(plugin)}
       plugin={plugin}
       detail={detail}
-      showMarketplace={!catalogSource}
+      showMarketplace
       installedIn={installedIn?.(plugin.id)}
       canInstall={caps.plugin.includes("install")}
       canUpdate={!installedIn && caps.plugin.includes("update")}
@@ -724,7 +745,7 @@ function BrowseList({
       {firstError ? <Notice tone="warning" text={t.diagnostic(firstError)} /> : null}
       {total > 0 || query.isFetching ? (
         <SectionLabel trailing={query.isFetching && !query.isFetchingNextPage ? <ActivityIndicator size="small" /> : null}>
-          {[catalogSource, total > 0 ? t.plugins.catalogCount(items.length, total) : null].filter(Boolean).join(" · ")}
+          {total > 0 ? t.plugins.catalogCount(items.length, total) : ""}
         </SectionLabel>
       ) : null}
       {query.isPending ? <LoadingLine /> : null}

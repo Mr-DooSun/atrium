@@ -6,16 +6,21 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { getProjectOrder, setNodeOrder, setProjectOrder, type NodeOrders } from "../shared/project-order";
+import type { HiddenProject } from "../shared/project-rpc";
 import { ROW, TITLE_LINE, type Palette } from "./look";
 import { sidebarText } from "./sidebar-strings";
 
-const KEY = ["projectOrder", 2] as const;
+export const PROJECT_ORDER_KEY = ["projectOrder", 2] as const;
+const KEY = PROJECT_ORDER_KEY;
 const NONE: readonly string[] = [];
 const NO_NODES: NodeOrders = {};
+const NO_HIDDEN: readonly HiddenProject[] = [];
 
-interface Saved {
+export interface Saved {
   order: readonly string[];
   nodes: NodeOrders;
+  /** Projects hidden from the Atrium sidebar, by host and id. Absent from older servers. */
+  hiddenProjects?: readonly HiddenProject[];
 }
 
 export interface ProjectOrder {
@@ -25,6 +30,8 @@ export interface ProjectOrder {
   nodes: NodeOrders;
   save(order: readonly string[]): void;
   saveNodes(group: string, order: readonly string[]): void;
+  /** Projects hidden from this sidebar (project.hide), kept by the daemon with the order. */
+  hidden: readonly HiddenProject[];
 }
 
 export function useProjectOrder(): ProjectOrder {
@@ -65,7 +72,45 @@ export function useProjectOrder(): ProjectOrder {
       ),
     [optimistic, setNodes],
   );
-  return { saved: query.data?.order ?? NONE, nodes: query.data?.nodes ?? NO_NODES, save, saveNodes };
+  return {
+    saved: query.data?.order ?? NONE,
+    nodes: query.data?.nodes ?? NO_NODES,
+    hidden: query.data?.hiddenProjects ?? NO_HIDDEN,
+    save,
+    saveNodes,
+  };
+}
+
+/**
+ * Keeps hidden projects where they were in the saved order. Reordering only sees the shown
+ * projects, so the order built from them (move / placeAt) would push every hidden one to the end.
+ * Here each hidden key keeps its old slot and the shown keys fill the other slots in their new
+ * order; anything left over follows. Keys are project root folders, as in the saved order.
+ */
+export function keepHiddenSlots(next: readonly string[], previous: readonly string[], hidden: ReadonlySet<string>): string[] {
+  if (hidden.size === 0) return [...next];
+  const rest = next.filter((key) => !hidden.has(key));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let i = 0;
+  for (const key of previous) {
+    if (hidden.has(key)) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(key);
+      }
+    } else if (i < rest.length) {
+      out.push(rest[i++]);
+    }
+  }
+  out.push(...rest.slice(i));
+  for (const key of next) {
+    if (hidden.has(key) && !seen.has(key)) {
+      seen.add(key);
+      out.push(key);
+    }
+  }
+  return out;
 }
 
 /** Pinned above the projects while reordering. */
@@ -147,14 +192,14 @@ export function ProjectMenu({
   open,
   onClose,
   onReorder,
-  onRemove,
+  onHide,
   p,
 }: {
   name: string;
   open: boolean;
   onClose(): void;
   onReorder(): void;
-  onRemove(): void;
+  onHide(): void;
   p: Palette;
 }) {
   const { t } = useTranslation(sidebarText);
@@ -191,7 +236,7 @@ export function ProjectMenu({
     >
       <Modal.Content>
         {item("ArrowUpDown", t("reorder"), onReorder)}
-        {item("FolderX", t("remove"), onRemove, true)}
+        {item("EyeOff", t("hide"), onHide)}
       </Modal.Content>
     </Modal>
   );
@@ -232,13 +277,18 @@ export function isPaneDrag(args: {
 }
 
 /** Hover button on a session row: opens it in the panes screen. */
-export function PanesButton({ onPress, p }: { onPress(): void; p: Palette }) {
+/** `onPress` omitted: the row has no chat to open yet, and the button says so instead of hiding. */
+export function PanesButton({ onPress, p }: { onPress?: () => void; p: Palette }) {
   const [hovered, setHovered] = useState(false);
   const { t } = useTranslation(sidebarText);
+  const disabled = !onPress;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={t("openInPanes")}
+      accessibilityLabel={disabled ? t("panesNoChat") : t("openInPanes")}
+      accessibilityState={{ disabled }}
+      aria-disabled={disabled}
+      disabled={disabled}
       hitSlop={6}
       onPress={onPress}
       onPointerEnter={() => setHovered(true)}
@@ -249,10 +299,11 @@ export function PanesButton({ onPress, p }: { onPress(): void; p: Palette }) {
         borderRadius: 5,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: hovered ? p.pressed : "transparent",
+        backgroundColor: hovered && !disabled ? p.pressed : "transparent",
+        opacity: disabled ? 0.4 : 1,
       }}
     >
-      <Icon name="PanelRightOpen" size={13} color={hovered ? p.foreground : p.muted} />
+      <Icon name="PanelRightOpen" size={13} color={hovered && !disabled ? p.foreground : p.muted} />
     </Pressable>
   );
 }
@@ -263,6 +314,7 @@ export function SessionMenu({
   open,
   onClose,
   onOpenInPanes,
+  onRename,
   onArchive,
   p,
 }: {
@@ -270,6 +322,8 @@ export function SessionMenu({
   open: boolean;
   onClose(): void;
   onOpenInPanes?: () => void;
+  /** Workspace rows only: compact layouts have no hover button to rename with. */
+  onRename?: () => void;
   onArchive?: () => void;
   p: Palette;
 }) {
@@ -307,6 +361,7 @@ export function SessionMenu({
     >
       <Modal.Content>
         {onOpenInPanes ? item("PanelRightOpen", t("openInPanes"), onOpenInPanes) : null}
+        {onRename ? item("Pencil", t("rename"), onRename) : null}
         {onArchive ? item("Archive", t("archive"), onArchive) : null}
       </Modal.Content>
     </Modal>
