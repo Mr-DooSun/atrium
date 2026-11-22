@@ -47,13 +47,17 @@ export function useProjectOrder(): ProjectOrder {
     staleTime: 30_000,
     retry: 2,
   });
-  // Shown at once; put back if the daemon does not take it.
+  // Shown at once; put back if the daemon does not take it. Only what this change touched is put
+  // back, onto whatever the cache holds by then: a hide/unhide answered in the meantime (its
+  // hiddenProjects) or another save must not be undone with it. Then the daemon's copy is fetched.
   const optimistic = useCallback(
-    (change: (current: Saved) => Saved, send: () => Promise<unknown>) => {
-      const previous = queryClient.getQueryData<Saved>(KEY);
-      queryClient.setQueryData<Saved>(KEY, change(previous ?? { order: NONE, nodes: NO_NODES }));
+    (change: (current: Saved) => Saved, revert: (current: Saved, previous: Saved) => Saved, send: () => Promise<unknown>) => {
+      const previous = queryClient.getQueryData<Saved>(KEY) ?? { order: NONE, nodes: NO_NODES };
+      queryClient.setQueryData<Saved>(KEY, change(previous));
       send().catch(() => {
-        queryClient.setQueryData(KEY, previous);
+        const current = queryClient.getQueryData<Saved>(KEY);
+        if (current) queryClient.setQueryData<Saved>(KEY, revert(current, previous));
+        void queryClient.invalidateQueries({ queryKey: KEY });
         toast.error(t("orderFailed"));
       });
     },
@@ -61,13 +65,18 @@ export function useProjectOrder(): ProjectOrder {
   );
   const save = useCallback(
     (order: readonly string[]) =>
-      optimistic((current) => ({ ...current, order: [...order] }), () => set({ order: [...order] })),
+      optimistic(
+        (current) => ({ ...current, order: [...order] }),
+        (current, previous) => ({ ...current, order: previous.order }),
+        () => set({ order: [...order] }),
+      ),
     [optimistic, set],
   );
   const saveNodes = useCallback(
     (group: string, order: readonly string[]) =>
       optimistic(
         (current) => ({ ...current, nodes: { ...current.nodes, [group]: [...order] } }),
+        (current, previous) => ({ ...current, nodes: withGroup(current.nodes, group, previous.nodes[group]) }),
         () => setNodes({ group, order: [...order] }),
       ),
     [optimistic, setNodes],
@@ -79,6 +88,12 @@ export function useProjectOrder(): ProjectOrder {
     save,
     saveNodes,
   };
+}
+
+/** `nodes` with one group's order set back to `order`, or the group dropped when it had none. */
+function withGroup(nodes: NodeOrders, group: string, order: readonly string[] | undefined): NodeOrders {
+  const { [group]: _dropped, ...rest } = nodes;
+  return order === undefined ? rest : { ...rest, [group]: order };
 }
 
 /** Pinned above the projects while reordering. */
