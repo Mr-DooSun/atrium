@@ -46,6 +46,7 @@ const en = {
   worktreeMain: "Branch {{branch}}",
   worktreePath: "Worktree path: {{path}}",
   branchesBelow: "Nested sessions by branch: {{list}}",
+  branchesBelowLead: "{{n}} nested:",
 };
 
 const zhCN = {
@@ -92,6 +93,7 @@ const zhCN = {
   worktreeMain: "分支 {{branch}}",
   worktreePath: "工作树路径：{{path}}",
   branchesBelow: "按分支统计的下级会话：{{list}}",
+  branchesBelowLead: "下级 {{n}} 个：",
 };
 
 const ptBR = {
@@ -138,6 +140,7 @@ const ptBR = {
   worktreeMain: "Branch {{branch}}",
   worktreePath: "Caminho da árvore de trabalho: {{path}}",
   branchesBelow: "Sessões aninhadas por branch: {{list}}",
+  branchesBelowLead: "{{n}} aninhadas:",
 };
 
 export const sidebarText = defineTranslations({
@@ -187,6 +190,7 @@ export const sidebarText = defineTranslations({
       worktreeMain: "브랜치 {{branch}}",
       worktreePath: "워크트리 경로: {{path}}",
       branchesBelow: "브랜치별 하위 세션: {{list}}",
+      branchesBelowLead: "하위 {{n}}개:",
     },
     ja: {
       startChat: "新しいチャットを開始",
@@ -232,6 +236,7 @@ export const sidebarText = defineTranslations({
       worktreeMain: "ブランチ {{branch}}",
       worktreePath: "ワークツリーのパス: {{path}}",
       branchesBelow: "ブランチ別の配下セッション: {{list}}",
+      branchesBelowLead: "配下 {{n}} 件:",
     },
     "zh-CN": zhCN,
     zh: zhCN,
@@ -279,6 +284,7 @@ export const sidebarText = defineTranslations({
       worktreeMain: "Rama {{branch}}",
       worktreePath: "Ruta del árbol de trabajo: {{path}}",
       branchesBelow: "Sesiones anidadas por rama: {{list}}",
+      branchesBelowLead: "{{n}} anidadas:",
     },
     fr: {
       startChat: "Démarrer une discussion",
@@ -324,6 +330,7 @@ export const sidebarText = defineTranslations({
       worktreeMain: "Branche {{branch}}",
       worktreePath: "Chemin de l’arbre de travail : {{path}}",
       branchesBelow: "Sous-sessions par branche : {{list}}",
+      branchesBelowLead: "{{n}} sous-sessions :",
     },
     "pt-BR": ptBR,
     pt: ptBR,
@@ -371,6 +378,7 @@ export const sidebarText = defineTranslations({
       worktreeMain: "Ветка {{branch}}",
       worktreePath: "Путь рабочего дерева: {{path}}",
       branchesBelow: "Вложенные сеансы по веткам: {{list}}",
+      branchesBelowLead: "Вложенные ({{n}}):",
     },
     ar: {
       startChat: "بدء محادثة جديدة",
@@ -416,6 +424,7 @@ export const sidebarText = defineTranslations({
       worktreeMain: "الفرع {{branch}}",
       worktreePath: "مسار شجرة العمل: {{path}}",
       branchesBelow: "الجلسات الفرعية حسب الفرع: {{list}}",
+      branchesBelowLead: "الفرعية ({{n}}):",
     },
   },
 });

@@ -107,8 +107,8 @@ interface Ctx {
   lane(nodeKey: string): Lane | null;
   /**
    * The branches a row's nested sessions work on, most used first, when any differs from the row's
-   * own; null otherwise. Shown under the row so a parent tells its children's branches at a glance
-   * without a level of grouping rows.
+   * own; null otherwise. Drawn under a collapsed row, or one whose nested sessions span several
+   * branches (see `BranchesBelow`), so a parent tells them apart without a level of grouping rows.
    */
   branchesBelow(nodeKey: string): readonly BranchBelow[] | null;
   /** The drag group a project header moves in: its host's section, or all projects with one host. */
@@ -1457,7 +1457,7 @@ function WorkspaceRow({
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
             {worktree && badge && showBadge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
-            <BranchesBelow branches={ctx.branchesBelow(node.key)} ctx={ctx} />
+            <BranchesBelow branches={ctx.branchesBelow(node.key)} open={open} ctx={ctx} />
             {branch || meta.length > 0 ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 {branch ? (
@@ -1590,7 +1590,7 @@ function AgentRow({
               <CompactToggle node={node} open={open} ctx={ctx} />
             </View>
             {worktree && badge && showBadge ? <WorktreeBadge info={worktree} spec={badge} p={p} /> : null}
-            <BranchesBelow branches={ctx.branchesBelow(node.key)} ctx={ctx} />
+            <BranchesBelow branches={ctx.branchesBelow(node.key)} open={open} ctx={ctx} />
           </View>
         </>
       )}
@@ -1599,11 +1599,20 @@ function AgentRow({
   );
 }
 
-/** Under a parent row: the branches its nested sessions work on, e.g. "feat/x 3 · main 2". */
-function BranchesBelow({ branches, ctx }: { branches: readonly BranchBelow[] | null; ctx: Ctx }) {
+/**
+ * Under a parent row: the branches its nested sessions work on, e.g. "3 nested: feat/x 2 · main 1".
+ * It leads with the count and a "nested" arrow so it never reads as the row's own branch (that is
+ * what the badge says). Shown only when the rows below do not already say it: when the row is
+ * collapsed, or when its nested sessions span more than one branch. An expanded row whose children
+ * are all on one branch leaves it to their badge and color bar.
+ */
+function BranchesBelow({ branches, open, ctx }: { branches: readonly BranchBelow[] | null; open: boolean; ctx: Ctx }) {
   const { t } = useTranslation(sidebarText);
   if (!branches || branches.length === 0) return null;
+  if (open && branches.length < 2) return null;
   const { p } = ctx;
+  const total = branches.reduce((n, b) => n + b.count, 0);
+  const single = branches.length === 1;
   const list = branches.map((b) => `${b.label} ${b.count}`).join(", ");
   return (
     <View
@@ -1612,14 +1621,15 @@ function BranchesBelow({ branches, ctx }: { branches: readonly BranchBelow[] | n
       style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 }}
     >
       <View style={{ flexShrink: 0 }}>
-        <Icon name="GitBranch" size={12} color={p.muted} />
+        <Icon name="CornerDownRight" size={12} color={p.muted} />
       </View>
       <Text numberOfLines={1} style={{ flexShrink: 1, minWidth: 0, fontSize: 12, color: p.muted }}>
+        {t("branchesBelowLead", { n: total })}{" "}
         {branches.map((b, i) => (
           <Text key={`${b.worktreePath ?? ""}|${b.label}`}>
             {i > 0 ? " · " : ""}
             <Text style={{ color: b.worktreePath ? worktreeColor(p, b.worktreePath) : p.muted }}>{b.label}</Text>
-            <Text style={{ fontVariant: ["tabular-nums"] }}> {b.count}</Text>
+            {single ? null : <Text style={{ fontVariant: ["tabular-nums"] }}> {b.count}</Text>}
           </Text>
         ))}
       </Text>

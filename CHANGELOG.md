@@ -14,7 +14,7 @@ features or behavior changes go in a minor release (0.2.0).
 ### Changed
 
 - A worktree's color bar runs unbroken through consecutive rows in the same checkout, so a run reads as one line instead of dashes. Runs follow the rows as drawn: a row after a parent's last child continues that child, and a collapsed row's hidden children do not count. The full badge shows on the first row of each run; a row in another checkout between two rows breaks the run, and the next one shows the badge again.
-- A parent row lists the branches its nested sessions work on, most used first, under its title (for example `feat/observer 4 · main 1`), in each worktree's color. It shows only when some nested session is on a branch other than the parent's own, and counts collapsed sessions too, so the tree tells its children's branches without a level of grouping rows.
+- A parent row can list the branches its nested sessions work on, under its title, led by an arrow and their count so it never reads as the row's own branch: `5 nested: feat/x` when collapsed, `3 nested: feat/x 2 · main 1` when they span several branches. An expanded row whose nested sessions are all on one branch shows nothing, since their badge and color bar already say it. Branches are in each worktree's color, most used first, collapsed sessions included.
 
 ### Fixed
 
