@@ -5,7 +5,7 @@ import type { PluginAgentSnapshot } from "@getpaseo/plugin";
 import { useTranslation } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { WorktreeInfo } from "../shared/project-rpc";
-import { ROW, TITLE_LINE, worktreeColor, type Bucket, type Palette, type WorktreeBadgeSpec } from "./look";
+import { ROW, TITLE_LINE, showsFolderChip, worktreeColor, type Bucket, type Palette, type WorktreeBadgeSpec } from "./look";
 import { providerMark } from "./provider-icons";
 import { sidebarText } from "./sidebar-strings";
 
@@ -163,7 +163,7 @@ export function WorktreeBadge({ info, spec, p }: { info: GitWorktree; spec: Work
           {spec.label}
         </Text>
       )}
-      {spec.folder ? (
+      {showsFolderChip(spec) ? (
         <Text
           numberOfLines={1}
           style={{

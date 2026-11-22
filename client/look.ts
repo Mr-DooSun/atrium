@@ -65,6 +65,17 @@ export function worktreeBadge(info: WorktreeInfo | null | undefined): WorktreeBa
   return { tone: "quiet", label, folder: null, detached: false };
 }
 
+/**
+ * Whether the badge draws its folder chip. Paseo names a worktree's folder after its branch
+ * (`feat/x` in `x`), so a chip that only repeats the branch's last part is dropped and the branch
+ * gets the room; the folder stays in the badge's accessibility label.
+ */
+export function showsFolderChip(spec: WorktreeBadgeSpec): boolean {
+  if (!spec.folder) return false;
+  if (spec.detached) return true;
+  return lastSegment(spec.label) !== spec.folder;
+}
+
 type Colors = PluginSidebarViewProps["theme"]["colors"];
 
 export interface Palette {

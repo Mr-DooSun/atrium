@@ -1,7 +1,7 @@
 // The sidebar's worktree badge decision (worktreeBadge) and per-worktree color (worktreeColor).
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { isDark, palette, worktreeBadge, worktreeColor, type Palette } from "../client/look.ts";
+import { isDark, palette, showsFolderChip, worktreeBadge, worktreeColor, type Palette } from "../client/look.ts";
 import { checkoutKey, type WorktreeInfo } from "../shared/project-rpc.ts";
 
 type GitInfo = Extract<WorktreeInfo, { kind: "git" }>;
@@ -245,4 +245,20 @@ test("checkoutKey: same host, folder and branch share a badge; any difference sp
   assert.notEqual(checkoutKey("h1", wt), checkoutKey("h1", { ...wt, branch: "feat/y" }));
   const detached = { ...wt, detached: true, branch: null, head: "abc1234" };
   assert.notEqual(checkoutKey("h1", detached), checkoutKey("h1", { ...detached, head: "def5678" }));
+});
+
+describe("showsFolderChip", () => {
+  test("a folder named after the branch's last part is not repeated", () => {
+    assert.equal(showsFolderChip(worktreeBadge(linked({ worktreePath: "/w/observer-gaps", branch: "feat/observer-gaps" }))!), false);
+    assert.equal(showsFolderChip(worktreeBadge(linked({ worktreePath: "/w/fix-x", branch: "fix-x" }))!), false);
+  });
+
+  test("a folder that says something else keeps its chip", () => {
+    assert.equal(showsFolderChip(worktreeBadge(linked({ worktreePath: "/w/app-feature", branch: "feature/x" }))!), true);
+    assert.equal(showsFolderChip(worktreeBadge(linked({ worktreePath: "/w/x", detached: true, head: "abc1234" }))!), true);
+  });
+
+  test("the main checkout has no chip", () => {
+    assert.equal(showsFolderChip(worktreeBadge(info({ branch: "develop" }))!), false);
+  });
 });
