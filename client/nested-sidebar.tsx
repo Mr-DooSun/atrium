@@ -1662,7 +1662,7 @@ function ProjectRow({
   if (!name) return null;
   return (
     <>
-    <HideProjectModal reference={reference} name={name} state={hide} p={p} />
+    <HideProjectModal name={name} state={hide} p={p} />
     <ProjectMenu
       name={name}
       open={menu}

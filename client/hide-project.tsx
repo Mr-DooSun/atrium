@@ -2,23 +2,20 @@
 // Paseo project, its sessions and its files stay as they are, and Paseo's own sidebar still lists
 // it. The daemon keeps the hidden list with the project order (project.hide / project.unhide).
 //
-// The list lives on this plugin's own daemon and the server only takes projects of its own host,
-// so a project on another host (or a daemon that cannot name itself) is never sent there.
+// The list lives on this plugin's own daemon, whichever host the project is on: a project of any
+// host can be hidden, even while that host is offline. Each entry names the project's own host.
 import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { useHosts, useProjects, useRpc, useTranslation, type ProjectRef } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
-import { hideProject, projectWorktrees, unhideProject, type HiddenProject } from "../shared/project-rpc";
+import { hideProject, unhideProject, type HiddenProject } from "../shared/project-rpc";
 import { ArchiveModal, type ArchiveState } from "./archive";
 import { ROW, type Palette } from "./look";
-import { OWN_HOST_KEY, projectRemovalTarget, useNamedOwnHost, type RemovalTarget } from "./own-host";
 import { PROJECT_ORDER_KEY, type Saved } from "./project-order";
 import { sidebarText } from "./sidebar-strings";
 
 export interface HideProjectState extends ArchiveState {
-  /** Where the project is as far as is known now; undefined while the daemon has not answered. */
-  target: RemovalTarget | undefined;
   /** Why the last attempt failed; shown in the dialog, which stays open. */
   error: string | null;
 }
@@ -38,42 +35,33 @@ function useApplyHidden() {
 
 export function useHideProject(reference: ProjectRef): HideProjectState {
   const hide = useRpc(hideProject);
-  const fetchWorktrees = useRpc(projectWorktrees);
-  const queryClient = useQueryClient();
   const applyHidden = useApplyHidden();
   const { t } = useTranslation(sidebarText);
-  const ownHost = useNamedOwnHost();
-  const target = ownHost === undefined ? undefined : projectRemovalTarget(reference.hostId, ownHost);
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirm = useCallback(() => {
     if (pending) return;
+    // The entry is kept by the project's own host id; without one there is nothing to name it by.
+    if (!reference.hostId) {
+      setError(t("hideFailed"));
+      return;
+    }
     setPending(true);
     setError(null);
-    const run = async () => {
-      // Asked again right before writing: the answer the dialog showed may be stale or a guess.
-      const { hostId } = await fetchWorktrees({ cwds: [] });
-      if (hostId) queryClient.setQueryData(OWN_HOST_KEY, hostId);
-      if (projectRemovalTarget(reference.hostId, hostId) !== "own") return false;
-      const { hiddenProjects } = await hide({ projectId: reference.id, hostId: reference.hostId });
-      applyHidden(hiddenProjects);
-      return true;
-    };
-    run()
-      .then((hidden) => {
-        // Not hidden: the dialog now shows the other host's notice from the refreshed answer.
-        if (hidden) setConfirming(false);
+    hide({ projectId: reference.id, hostId: reference.hostId })
+      .then(({ hiddenProjects }) => {
+        applyHidden(hiddenProjects);
+        setConfirming(false);
       })
       .catch((failure: unknown) => {
         setError(failure instanceof Error && failure.message ? failure.message : t("hideFailed"));
       })
       .finally(() => setPending(false));
-  }, [hide, fetchWorktrees, queryClient, applyHidden, reference.id, reference.hostId, pending, t]);
+  }, [hide, applyHidden, reference.id, reference.hostId, pending, t]);
   return {
     confirming,
     pending,
-    target,
     error,
     begin: useCallback(() => {
       setError(null);
@@ -84,37 +72,24 @@ export function useHideProject(reference: ProjectRef): HideProjectState {
   };
 }
 
-/** The confirmation: what hiding does and does not touch, or why it can't be done from here. */
+/** The confirmation: what hiding does and does not touch. */
 export function HideProjectModal({
-  reference,
   name,
   state,
   p,
 }: {
-  reference: ProjectRef;
   name: string;
   state: HideProjectState;
   p: Palette;
 }) {
   const { t } = useTranslation(sidebarText);
-  const hosts = useHosts();
-  const elsewhere = state.target === "other" || state.target === "unknown";
-  let warning: string;
-  if (state.target === "other") {
-    const host = hosts.find((h) => h.serverId === reference.hostId)?.label ?? reference.hostId;
-    warning = t("hideOtherHost", { host });
-  } else if (state.target === "unknown") {
-    warning = t("hideHostUnknown");
-  } else {
-    warning = t("hideBody");
-  }
   return (
     <ArchiveModal
       state={state}
       title={name}
-      warning={warning}
+      warning={t("hideBody")}
       error={state.error}
-      confirmHidden={elsewhere}
+      confirmHidden={false}
       danger={false}
       p={p}
       labels={{
@@ -122,7 +97,7 @@ export function HideProjectModal({
         icon: "EyeOff",
         confirm: t("hideConfirm"),
         pending: t("hiding"),
-        cancel: elsewhere ? t("close") : t("cancel"),
+        cancel: t("cancel"),
       }}
     />
   );
@@ -130,10 +105,11 @@ export function HideProjectModal({
 
 /**
  * At the bottom of the sidebar: how many projects are hidden, unfolding to each with "Show
- * again". Only the plugin's own host can have hidden projects (the server takes no others).
+ * again". Hidden projects can be on any host; with more than one host, each row names its host.
  */
 export function HiddenProjects({ hidden, p }: { hidden: readonly HiddenProject[]; p: Palette }) {
   const { t } = useTranslation(sidebarText);
+  const hosts = useHosts();
   const [open, setOpen] = useState(false);
   if (hidden.length === 0) return null;
   return (
@@ -160,12 +136,22 @@ export function HiddenProjects({ hidden, p }: { hidden: readonly HiddenProject[]
           {t("hiddenProjects", { n: hidden.length })}
         </Text>
       </Pressable>
-      {open ? hidden.map((entry) => <HiddenProjectRow key={`${entry.hostId}\u0000${entry.projectId}`} entry={entry} p={p} />) : null}
+      {open
+        ? hidden.map((entry) => (
+            <HiddenProjectRow
+              key={`${entry.hostId}\u0000${entry.projectId}`}
+              entry={entry}
+              host={hosts.length > 1 ? hosts.find((h) => h.serverId === entry.hostId)?.label || entry.hostId : null}
+              p={p}
+            />
+          ))
+        : null}
     </View>
   );
 }
 
-function HiddenProjectRow({ entry, p }: { entry: HiddenProject; p: Palette }) {
+/** `host` is the project's host name, shown when the sidebar has more than one host; else null. */
+function HiddenProjectRow({ entry, host, p }: { entry: HiddenProject; host: string | null; p: Palette }) {
   const { t } = useTranslation(sidebarText);
   const toast = useToast();
   const unhide = useRpc(unhideProject);
@@ -189,6 +175,11 @@ function HiddenProjectRow({ entry, p }: { entry: HiddenProject; p: Palette }) {
       <Text numberOfLines={1} style={{ flex: 1, color: p.muted, fontSize: 13, textAlign: "left" }}>
         {typeof name === "string" && name ? name : t("hiddenMissing", { id: entry.projectId })}
       </Text>
+      {host ? (
+        <Text numberOfLines={1} style={{ flexShrink: 1, maxWidth: "40%", color: p.muted, fontSize: 11, textAlign: "right" }}>
+          {host}
+        </Text>
+      ) : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={t("unhide")}

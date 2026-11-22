@@ -29,8 +29,7 @@ export function useNamedOwnHost(): string | null | undefined {
 /**
  * The host id of the daemon serving this plugin's RPCs, or null while unknown. An older server does
  * not name itself, and then the only host it can be is the single configured one. With several
- * hosts and no name, null. Good enough to choose which folders to look into; not for removing
- * anything (see `projectRemovalTarget`).
+ * hosts and no name, null. Good enough to choose which folders to look into.
  */
 export function useOwnHost(): string | null {
   const hosts = useHosts();
@@ -40,12 +39,3 @@ export function useOwnHost(): string | null {
   return null;
 }
 
-/**
- * Whether Atrium may remove a project on `projectHost`: only when the daemon that would run the
- * removal named itself as that host. A guess is never enough; the server refuses it as well.
- */
-export type RemovalTarget = "own" | "other" | "unknown";
-export function projectRemovalTarget(projectHost: string, ownHost: string | null | undefined): RemovalTarget {
-  if (!ownHost) return "unknown";
-  return ownHost === projectHost ? "own" : "other";
-}
