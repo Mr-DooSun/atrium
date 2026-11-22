@@ -96,3 +96,17 @@ export function reorderSection(
 export function sectionSaved(saved: readonly string[], host: string | null): string[] {
   return host === null ? [...saved] : saved.filter((key) => orderKeyHost(key) === host);
 }
+
+/**
+ * Every project's order key where the sidebar shows it now, hidden ones included: the projects
+ * the saved order does not name yet first, in their default order (`keys`), as `applyOrder` puts
+ * them, then the saved order itself, keys no project has now (an offline host's) staying in place.
+ * Reordering starts from this rather than the saved order alone, which may not name a project
+ * (never saved, or added since): a hidden project it did not name would lose its slot and come
+ * back first, as a new project does.
+ */
+export function displayedOrder(keys: readonly string[], saved: readonly string[]): string[] {
+  const named = new Set(saved);
+  const fresh = [...new Set(keys)].filter((key) => !named.has(key));
+  return [...fresh, ...named];
+}

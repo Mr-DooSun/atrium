@@ -58,7 +58,7 @@ import { sidebarText } from "./sidebar-strings";
 import { usePendingPermissions } from "./pending-permissions";
 import { useWorktrees } from "./worktrees";
 import { useCollapsed } from "./collapsed-store";
-import { hiddenKeySet, isHiddenProject, reorderSection, sectionSaved, visibleProjectBlocks } from "./sidebar-visibility";
+import { displayedOrder, hiddenKeySet, isHiddenProject, reorderSection, sectionSaved, visibleProjectBlocks } from "./sidebar-visibility";
 import { workspaceCustomTitle, workspaceRowLabel } from "./workspace-naming";
 
 const ROOT = "__root__";
@@ -315,12 +315,21 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   );
 
   // Projects with sessions in tree order (most recent work first), then empty ones by name.
-  const blocks = useMemo(() => {
+  const allBlocks = useMemo(() => {
     const all: { projectKey: string; roots: readonly TreeNode[] }[] = [...tree];
     const inTree = new Set(tree.map((b) => b.projectKey));
     for (const ref of projects) if (!inTree.has(ref.key)) all.push({ projectKey: ref.key, roots: [] });
+    return all;
+  }, [tree, projects]);
+  // What a reorder starts from: every project where the sidebar puts it now, hidden ones included,
+  // so a hidden project keeps its place even when the saved order has never named it.
+  const baseOrder = useMemo(
+    () => displayedOrder(allBlocks.map((b) => rootOf(b.projectKey)), savedOrder),
+    [allBlocks, savedOrder, rootOf],
+  );
+  const blocks = useMemo(() => {
     // Hidden from this sidebar (project.hide): by host and id, since ids can repeat across hosts.
-    const shown = visibleProjectBlocks(all, projectRefs, hiddenKeys);
+    const shown = visibleProjectBlocks(allBlocks, projectRefs, hiddenKeys);
     // A hand-set order, when there is one, wins over recent work, for projects and the sessions
     // under them at every depth.
     const ordered = applyOrder(shown, savedOrder, (b) => rootOf(b.projectKey)).map((b) => ({
@@ -330,7 +339,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     if (!hostSections) return ordered;
     // Hosts in the app's order, a host it no longer lists last; projects keep their order inside.
     return sectionByHost(ordered, (b) => hostOf(b.projectKey), hosts.map((h) => h.serverId));
-  }, [tree, projects, projectRefs, hiddenKeys, savedOrder, rootOf, rootGroup, nodeOrders, hostSections, hosts, hostOf]);
+  }, [allBlocks, projectRefs, hiddenKeys, savedOrder, rootOf, rootGroup, nodeOrders, hostSections, hosts, hostOf]);
 
   const [reordering, setReordering] = useState(false);
   // A project moves among its own host's projects: a place in another host's section would not show.
@@ -350,9 +359,9 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     (key: string, delta: -1 | 1) => {
       const shown = sectionOf(key).map((b) => rootOf(b.projectKey));
       const host = hostOf(key);
-      order.save(reorderSection(savedOrder, move(shown, sectionSaved(savedOrder, host), rootOf(key), delta), host, hiddenRoots));
+      order.save(reorderSection(baseOrder, move(shown, sectionSaved(baseOrder, host), rootOf(key), delta), host, hiddenRoots));
     },
-    [sectionOf, hostOf, order, savedOrder, rootOf, hiddenRoots],
+    [sectionOf, hostOf, order, baseOrder, rootOf, hiddenRoots],
   );
   const projectsGroupOf = useCallback((projectKey: string) => projectsGroup(hostOf(projectKey)), [hostOf]);
 
@@ -512,14 +521,14 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
       if (isProjectsGroup(target.group)) {
         // Within the dragged project's host section; other hosts' places are left as they are.
         const host = hostOf(target.key);
-        const next = placeAt(shown.map(rootOf), sectionSaved(savedOrder, host), rootOf(target.key), land.at);
-        order.save(reorderSection(savedOrder, next, host, hiddenRoots));
+        const next = placeAt(shown.map(rootOf), sectionSaved(baseOrder, host), rootOf(target.key), land.at);
+        order.save(reorderSection(baseOrder, next, host, hiddenRoots));
       } else {
         // Only the children shown now: archived sessions do not come back, so they need no place.
         order.saveNodes(target.group, placeAt(shown, [], target.key, land.at));
       }
     },
-    [landing, hostOf, order, savedOrder, rootOf, hiddenRoots, stopTimer],
+    [landing, hostOf, order, baseOrder, rootOf, hiddenRoots, stopTimer],
   );
   const dropMark = useMemo((): DropMark | null => {
     if (!drag) return null;
