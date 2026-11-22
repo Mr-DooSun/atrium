@@ -6,7 +6,7 @@ import { z } from "zod";
 export const ProviderKind = z.enum(["claude", "codex", "antigravity"]);
 export type ProviderKind = z.infer<typeof ProviderKind>;
 
-/** Where a plugin comes from. "paseo" is Paseo's own plugin system (no profile). */
+/** Ecosystem/navigation tag. "paseo" opens native management and has no Toolbox operations. */
 export const Ecosystem = z.enum(["paseo", "claude", "codex", "antigravity"]);
 export type Ecosystem = z.infer<typeof Ecosystem>;
 
@@ -202,6 +202,8 @@ export type CatalogSort = z.infer<typeof CatalogSort>;
 export const ECOSYSTEM_CAPS: Record<
   Ecosystem,
   {
+    /** Native ecosystems are navigation-only; never call Toolbox management RPCs for them. */
+    management: "native" | "toolbox";
     plugin: readonly PluginAction[];
     marketplace: readonly MarketplaceAction[];
     browse: boolean;
@@ -214,14 +216,16 @@ export const ECOSYSTEM_CAPS: Record<
   }
 > = {
   paseo: {
-    plugin: ["install", "uninstall", "enable", "disable", "update"],
+    management: "native",
+    plugin: [],
     marketplace: [],
-    browse: true,
-    sources: ["git", "npm", "local"],
+    browse: false,
+    sources: [],
     scopes: [],
-    sorts: ["name", "installs", "updated"],
+    sorts: ["name"],
   },
   claude: {
+    management: "toolbox",
     plugin: ["install", "uninstall", "enable", "disable", "update"],
     marketplace: ["add", "remove", "update"],
     browse: true,
@@ -229,8 +233,9 @@ export const ECOSYSTEM_CAPS: Record<
     scopes: ["user", "project", "local"],
     sorts: ["name", "installs"],
   },
-  codex: { plugin: ["install", "uninstall"], marketplace: ["add", "remove", "update"], browse: true, sources: [], scopes: [], sorts: ["name"] },
+  codex: { management: "toolbox", plugin: ["install", "uninstall"], marketplace: ["add", "remove", "update"], browse: true, sources: [], scopes: [], sorts: ["name"] },
   antigravity: {
+    management: "toolbox",
     plugin: ["install", "uninstall", "enable", "disable"],
     marketplace: [],
     browse: false,

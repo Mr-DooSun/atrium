@@ -36,7 +36,11 @@ export function createUsageService(options: UsageServiceOptions = {}) {
     } else {
       let retryAt: number | undefined;
       rateLimits = await fetchClaudeRateLimits(account, options, (retry) => { retryAt = retry ?? now() + ttl; });
-      rateCache.set(key, { fetchedAt: now(), rateLimits, retryAt });
+      const fetchedAt = now();
+      if (rateLimits.state === "ok") {
+        rateLimits = { ...rateLimits, observedAt: new Date(fetchedAt).toISOString() };
+      }
+      rateCache.set(key, { fetchedAt, rateLimits, retryAt });
     }
     const reset = rateLimits.windows.find((window) => window.kind === "five_hour")?.resetsAt;
     const local = await localReader.read(account.configHome, at, reset);

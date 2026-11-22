@@ -122,7 +122,7 @@ function modelId(name: string): string {
 
 export function parseRateLimits(value: unknown): RateLimits {
   const response = asRecord(value);
-  if (!response) return emptyRateLimits("error", "Invalid Anthropic usage response.");
+  if (!response) return emptyRateLimits("error", "Usage response was unreadable. Refresh to try again.");
   const windows = new Map<string, RateLimitWindow>();
   for (const [key, raw] of Object.entries(response)) {
     if (key === "five_hour" || key === "seven_day") {
@@ -158,7 +158,7 @@ export function parseRateLimits(value: unknown): RateLimits {
     }
   }
   // The API can return null for every window on a plan with no available usage meters.
-  if (windows.size === 0) return emptyRateLimits("unavailable", "Anthropic returned no usage windows.");
+  if (windows.size === 0) return emptyRateLimits("unavailable", "No subscription quota is reported for this login. Check the plan in Claude.");
   const models = [...windows.values()].filter((window) => window.kind === "model_weekly");
   const primary = [windows.get("five_hour"), windows.get("seven_day")].filter((window) => window !== undefined);
   return { state: "ok", windows: [...primary, ...models] };
@@ -181,18 +181,18 @@ export async function fetchClaudeRateLimits(
   onThrottle?: (retryAt?: number) => void,
 ): Promise<RateLimits> {
   if (account.nonLocalOAuth) {
-    return emptyRateLimits("unavailable", "This Claude profile uses a different authentication source.");
+    return emptyRateLimits("unavailable", "Subscription quota is unavailable for API or gateway logins. Check your provider's billing.");
   }
   const credential = await readCredentials(account, options);
   switch (credential.state) {
     case "unauthenticated":
-      return emptyRateLimits("unauthenticated", "Claude OAuth login was not found.");
+      return emptyRateLimits("unauthenticated", "Run claude auth login for this profile, then refresh.");
     case "expired":
-      return { ...emptyRateLimits("expired", "Claude OAuth login has expired."), expiresAt: credential.expiresAt };
+      return { ...emptyRateLimits("expired", "Run claude auth login again for this profile, then refresh."), expiresAt: credential.expiresAt };
     case "unavailable":
-      return emptyRateLimits("error", "Claude OAuth credentials could not be read.");
+      return emptyRateLimits("error", "Open this profile's Claude CLI to check login access, then refresh.");
     case "error":
-      return emptyRateLimits("error", "Claude OAuth credentials are malformed.");
+      return emptyRateLimits("error", "Run claude auth login again for this profile, then refresh.");
   }
 
   const controller = new AbortController();
@@ -211,16 +211,16 @@ export async function fetchClaudeRateLimits(
       signal: controller.signal,
     });
     if (response.status === 401 || response.status === 403) {
-      return { ...emptyRateLimits("unauthenticated", "Anthropic rejected the Claude OAuth login."), rejectedStatus: response.status };
+      return { ...emptyRateLimits("unauthenticated", "Run claude auth login again for this profile, then refresh."), rejectedStatus: response.status };
     }
     if (response.status === 429) {
       onThrottle?.(retryAfterTime(response.headers?.get("retry-after"), (options.now ?? Date.now)()));
-      return emptyRateLimits("error", "Anthropic throttled the usage request.");
+      return emptyRateLimits("error", "Usage refresh is rate-limited. Wait before refreshing again.");
     }
-    if (!response.ok) return emptyRateLimits("error", "Anthropic usage request failed.");
+    if (!response.ok) return emptyRateLimits("error", "Usage service is unavailable. Check your connection and retry.");
     return parseRateLimits(await response.json());
   } catch {
-    return emptyRateLimits("error", "Anthropic usage could not be fetched or parsed.");
+    return emptyRateLimits("error", "Usage could not be refreshed. Check your connection and retry.");
   } finally {
     clearTimeout(timeout);
   }

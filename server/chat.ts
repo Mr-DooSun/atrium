@@ -4,7 +4,9 @@ import { join } from "node:path";
 import type { PluginServerContext, PluginSubscriptionContext } from "@getpaseo/plugin/server";
 import type { z } from "zod";
 import { computeChatLinks, toChatItem } from "../shared/chat/convert";
-import { chatLinks, chatOlder, chatTimelines, ensureChatDir, type ChatItem } from "../shared/chat/rpc";
+import { chatLinks, chatOlder, chatSend, chatTimelines, ensureChatDir, type ChatItem } from "../shared/chat/rpc";
+
+import { ownHostId } from "./core/host-id";
 
 /** The daemon user's scratch folder for free chat. Not a git repo, so no worktrees. */
 export const CHAT_DIR = join(homedir(), ".paseo-chat");
@@ -178,6 +180,41 @@ export function registerChat(server: PluginServerContext) {
   server.handle(ensureChatDir, async () => {
     await mkdir(CHAT_DIR, { recursive: true });
     return { path: CHAT_DIR };
+  });
+
+  server.handle(chatSend, async ({ agentId, hostId, text, activeTurnBehavior, images, attachments }, { paseo }) => {
+    if (images?.length || attachments?.length) {
+      return { ok: false as const, error: { code: "validation_failed" as const, message: "Attachments are not supported in Panes. Open the session in Paseo to send attachments." } };
+    }
+    if (activeTurnBehavior === "interrupt") {
+      return { ok: false as const, error: { code: "validation_failed" as const, message: "Panes only support steering an active turn. Open the session in Paseo to interrupt it." } };
+    }
+    const unavailable = (reason: "archived" | "agent_missing" | "workspace_missing" | "project_missing" | "host_unknown" | "host_mismatch") => ({
+      ok: false as const, error: { code: "agent_unavailable" as const, reason, message: "This session is no longer available for messages." },
+    });
+    const agent = paseo.agents.ref(agentId);
+    try {
+      const currentHost = await ownHostId(paseo);
+      if (!currentHost) return unavailable("host_unknown");
+      if (currentHost !== hostId) return unavailable("host_mismatch");
+      const snapshot = await agent.refresh();
+      if (!snapshot) return unavailable("agent_missing");
+      if (snapshot.agent.archivedAt) return unavailable("archived");
+      if (!snapshot.agent.workspaceId) return unavailable("workspace_missing");
+      const workspace = await paseo.workspaces.ref(snapshot.agent.workspaceId).refresh();
+      if (!workspace) return unavailable("workspace_missing");
+      const { projects } = await paseo.projects.list();
+      if (!projects.some((project) => project.projectId === workspace.projectId)) return unavailable("project_missing");
+    } catch {
+      // A failed read cannot establish that sending is safe. Never fall through to send.
+      return { ok: false as const, error: { code: "validation_failed" as const, message: "The session could not be checked. Try again after reconnecting." } };
+    }
+    try {
+      await agent.send(text, { activeTurnBehavior: "steer" });
+      return { ok: true as const };
+    } catch {
+      return { ok: false as const, error: { code: "send_failed" as const, message: "The message could not be sent." } };
+    }
   });
 
   server.handle(chatTimelines, ({ agentIds, tail }, context) => {

@@ -1,8 +1,7 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { projectWorktrees, removeProject, type WorktreeInfo } from "../shared/project-rpc";
-import { failure, run } from "./core/exec.ts";
+import { hideProject, unhideProject, projectWorktrees, removeProject, type WorktreeInfo } from "../shared/project-rpc";
 import { ownHostId } from "./core/host-id.ts";
-import { paseoHomeArgs, resolvePaseoCommand } from "./core/paseo-bin.ts";
+import { setProjectHidden } from "./project-order";
 import { getWorktreeInfo } from "./core/worktree.ts";
 
 export function registerProject(server: PluginServerContext) {
@@ -21,28 +20,13 @@ export function registerProject(server: PluginServerContext) {
     return { hostId: await hostId, worktrees: Object.fromEntries(entries) };
   });
 
-  server.handle(removeProject, async ({ projectId }) => {
-    const paseo = await resolvePaseoCommand();
-    // Same daemon home as this plugin's daemon when Paseo sets one; the CLI default otherwise.
-    const home = paseoHomeArgs();
-
-    // `project delete` reports success for an id it does not know, so check the id first:
-    // otherwise a wrong id would look removed while nothing changed.
-    const list = await run(paseo, ["project", "ls", "--json", ...home], { timeoutMs: 30_000 });
-    const listError = failure(list);
-    if (listError) throw new Error(listError);
-    const projects = JSON.parse(list.stdout) as { projectId?: string }[];
-    if (!projects.some((p) => p.projectId === projectId)) {
-      throw new Error(`Project ${projectId} is not registered on this daemon`);
-    }
-
-    // argv only, and "--" so an id can never be read as an option.
-    const result = await run(paseo, ["project", "delete", ...home, "--", projectId], { timeoutMs: 60_000 });
-    const error = failure(result);
-    if (error) {
-      console.error("project delete failed", { projectId, error });
-      throw new Error(error);
-    }
-    return { ok: true as const };
-  });
+  for (const [rpc, hidden] of [[hideProject, true], [unhideProject, false], [removeProject, true]] as const) {
+    server.handle(rpc, async ({ projectId, hostId }, context) => {
+      if (!hostId) throw new Error("Project target host is required. Refresh Atrium before hiding projects.");
+      const currentHostId = await ownHostId(context?.paseo);
+      if (!currentHostId) throw new Error("This daemon's host could not be identified.");
+      if (hostId !== currentHostId) throw new Error("Project target host does not match this daemon.");
+      return { ok: true as const, hiddenProjects: await setProjectHidden(hostId, projectId, hidden) };
+    });
+  }
 }

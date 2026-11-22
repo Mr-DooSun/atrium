@@ -1,6 +1,6 @@
 // The interface every ecosystem adapter implements. Owned by the orchestrator.
 // Each worker owns one adapter folder under server/adapters/<name>/ and exports an object
-// satisfying `ProviderAdapter` (claude, codex, antigravity) or `PluginEcosystemAdapter` (paseo).
+// satisfying `ProviderAdapter` (claude, codex, antigravity). Paseo uses native management.
 import type {
   ActionPreview,
   AuthState,
@@ -33,7 +33,7 @@ export interface CatalogResult {
   marketplaces: Marketplace[];
 }
 
-/** Plugin management for one ecosystem. `profile` is null only for paseo. */
+/** Plugin management for one managed ecosystem; nullable profile is retained for compatibility. */
 export interface PluginEcosystemAdapter {
   /** `cwd`: the agent's project, so project/local-scoped plugins are listed and targeted too. */
   listInstalled(profile: ProfileRuntime | null, cwd?: string | null): Promise<InstalledPlugin[]>;

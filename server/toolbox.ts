@@ -37,7 +37,7 @@ import { checkedCwd } from "./core/cwd";
 import { claudeAdapter } from "./adapters/claude";
 import { codexAdapter } from "./adapters/codex";
 import { antigravityAdapter } from "./adapters/antigravity";
-import { paseoPluginsAdapter } from "./adapters/paseo";
+import { PASEO_NATIVE_GALLERY_NOTICE } from "../shared/toolbox/warnings";
 
 const providers: Record<ProviderKind, ProviderAdapter> = {
   claude: claudeAdapter,
@@ -73,7 +73,7 @@ async function ecosystem(
   eco: Ecosystem,
   profileId: string | null,
 ): Promise<{ adapter: PluginEcosystemAdapter; profile: ResolvedProfile | null }> {
-  if (eco === "paseo") return { adapter: paseoPluginsAdapter, profile: null };
+  if (ECOSYSTEM_CAPS[eco].management === "native") throw new Error(PASEO_NATIVE_GALLERY_NOTICE);
   if (!profileId) throw new Error(`${eco} plugins need a profile`);
   const profile = await profileById(paseo, profileId);
   if (profile.profile.kind !== eco) throw new Error(`Profile ${profileId} is not a ${eco} profile`);
@@ -93,6 +93,7 @@ const notPossible = (warning: string): ActionPreview => ({ command: [], source: 
 const failed = (error: string): CommandResult => ({ ok: false, command: [], output: "", error, needsReload: false });
 
 function checkedSource(eco: Ecosystem, source: PluginSourceInput): string | null {
+  if (ECOSYSTEM_CAPS[eco].management === "native") return PASEO_NATIVE_GALLERY_NOTICE;
   if (!ECOSYSTEM_CAPS[eco].sources.includes(source.kind)) return `${eco} plugins cannot be installed from a ${source.kind} source`;
   try {
     checkedScope(eco, source.scope);
@@ -270,6 +271,7 @@ export function registerToolbox(server: PluginServerContext) {
   });
 
   server.handle(previewMarketplaceAction, async (input, { paseo }) => {
+    if (ECOSYSTEM_CAPS[input.ecosystem].management === "native") return notPossible(PASEO_NATIVE_GALLERY_NOTICE);
     if (!ECOSYSTEM_CAPS[input.ecosystem].marketplace.includes(input.action)) {
       return notPossible(`${input.ecosystem} cannot ${input.action} marketplaces`);
     }

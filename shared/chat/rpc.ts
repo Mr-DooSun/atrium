@@ -16,6 +16,8 @@ export const ChatItem = z.object({
   kind: z.enum(["user", "assistant", "reasoning", "tool", "status", "other"]),
   text: z.string(),
   toolName: z.string().optional(),
+  /** Agent that sent this instruction, for agent_message timeline entries. */
+  senderName: z.string().optional(),
   at: z.string().optional(),
   /** Tool call state as the daemon reports it (running, completed, failed, canceled). */
   status: z.string().optional(),
@@ -87,4 +89,27 @@ export const chatLinks = defineRpc({
       childAgentIds: z.array(z.string()),
     })),
   }),
+});
+
+/** Sends only to a current, active agent on the RPC daemon. Always steers an existing turn. */
+export const chatSend = defineRpc({
+  name: "chat.send",
+  input: z.object({
+    agentId: z.string().min(1),
+    hostId: z.string().min(1).max(256).regex(/^\S+$/),
+    text: z.string().refine((text) => text.trim().length > 0),
+    // Recognize unsupported payloads so they get an explicit error instead of being dropped.
+    activeTurnBehavior: z.enum(["steer", "interrupt"]).optional(),
+    images: z.array(z.unknown()).optional(),
+    attachments: z.array(z.unknown()).optional(),
+  }).strict(),
+  output: z.discriminatedUnion("ok", [
+    z.object({ ok: z.literal(true) }),
+    z.object({ ok: z.literal(false), error: z.discriminatedUnion("code", [
+      z.object({ code: z.literal("agent_unavailable"), reason: z.enum([
+        "archived", "agent_missing", "workspace_missing", "project_missing", "host_unknown", "host_mismatch",
+      ]), message: z.string() }),
+      z.object({ code: z.enum(["validation_failed", "send_failed"]), message: z.string() }),
+    ]) }),
+  ]),
 });
