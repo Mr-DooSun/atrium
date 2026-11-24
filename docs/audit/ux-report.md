@@ -294,3 +294,31 @@ R-1을 우회한 사본 기준으로 모두 정상이다: 트리 중첩, worktre
 ## 정리 상태
 
 격리 데몬(`/private/tmp/atrium-uxre2`)과 정적 서버는 종료했다. 임시 폴더 `/private/tmp/atrium-uxre2`, `/private/tmp/atrium-uxre2-fx`가 남아 있다. 추가한 것은 이 섹션과 `re2-*.png` 2장이다.
+
+---
+
+# 재검증 3차 (rebase 후) (2026-11-22, `fix/client-audit` @ cdf0c4e, origin/main 0.5.0 위)
+
+- 환경: 격리 데몬 A(6811) + B(6813), 정적 웹 클라이언트 6812. RELEASING.md §3 절차대로 두 데몬에 브랜치를 **수정 없이** 폴더 설치하고 `host add 127.0.0.1:6813 --label "Host B"`로 A에 B를 붙였다. 브라우저는 새 origin(`http://localhost:6812`)으로 열었다. 실사용 데몬(6767)은 건드리지 않았다.
+- 픽스처: 호스트마다 git 프로젝트 3개, worktree 워크스페이스 1개, 에이전트 2~3개.
+- 한계: 세션 대부분 동안 브라우저 탭이 화면 캡처를 내주지 않아(`screenshot_no_frame`) 확인은 DOM 읽기로 했고, 스크린샷은 마지막에 compact 너비로 3장만 남겼다. 캡처에 보이는 "Host A"는 호스트 이름을 가린 것이다. 세션 내내 콘솔에 평가 오류는 없었다.
+
+| # | 항목 | 결과 | 확인한 내용 |
+|---|---|---|---|
+| 1 | 호스트 섹션에서 숨기기 | 통과 | A 섹션의 `a-beta`, B 섹션의 `b-two`를 숨기면 각 섹션에서 빠지고 "숨긴 프로젝트 2개"에 `a-beta / <A 이름>`, `b-two / Host B`로 호스트가 붙어 나온다. 순서를 바꾸지 않고 다시 표시하면 원래 자리로 돌아온다(A의 가운데, B의 맨 끝 모두 확인). `re3-03-hidden-list-with-host-labels.png` |
+| 2 | A 숨김 중 B 재정렬 → 다시 표시 | 통과 | `a-beta`를 숨긴 채 B 섹션에서 `b-one`을 맨 위로 옮기고 다시 표시하니 A 순서(`a-gamma, a-beta, a-alpha`)가 그대로다. |
+| 3 | 숨기기 창 제목 "이름 · 호스트" | 통과 | `a-beta · <A 이름>`, `b-two · Host B`. compact의 프로젝트 메뉴 제목도 `b-one · Host B`. `re3-02-hide-dialog-name-and-host.png`, `re3-01-compact-project-menu-host-label.png` |
+| 4 | worktree 레인/배지와 Atrium 배지 항목 공존 | 통과 | Paseo 기본 사이드바에서 두 호스트의 worktree 행에 Atrium 배지(`feature-login · feature/login`, `feature-b · feature/b`)가 붙고 일반 행에는 없다. Atrium 보기에서는 A의 worktree 행에 배지가, B의 worktree 행에는 Paseo의 브랜치 줄(`feature/b`)이 나온다(다른 호스트는 기본 줄을 쓰는 기존 설계). 겹치거나 깨진 행은 없었다. 색과 레인의 모양은 캡처가 안 돼 눈으로 확인하지 못했다. |
+| 5 | `/plugins` Paseo 탭 안내 | 통과 | "Paseo 플러그인은 Paseo에서 관리합니다 / <호스트>의 Paseo에서 설정 > 플러그인을 열어 … 여기의 다른 탭은 Claude Code, Codex, Antigravity 플러그인을 관리합니다." |
+| 6 | 설정 > 사이드바 > 보기 → Atrium | 통과 | 목록에 Atrium이 있고, 고르면 호스트 섹션 두 개와 프로젝트, 세션이 나온다. |
+| 7 | 스모크 | 통과 | 패널 전송(A의 에이전트에 보내고 응답 수신), 이름 바꾸기(A, B 워크스페이스 모두), compact 길게 누르기(세션: 패널에서 열기 / 이름 바꾸기 / 보관, 프로젝트: 순서 바꾸기 / 사이드바에서 숨기기). |
+
+## 새로 본 것 (사소, PR을 막을 정도는 아님)
+
+- **같은 섹션 안에서 숨김 + 재정렬**: B가 `b-two, b-one, b-three`일 때 가운데 `b-one`을 숨기고 남은 둘을 맞바꾼 뒤(`b-three, b-two`) 다시 표시하면 `b-one`이 가운데가 아니라 섹션 맨 위로 온다(`b-one, b-three, b-two`). 저장된 순서에서도 맨 앞이다. 요청받은 경우(다른 호스트 섹션을 재정렬)는 문제없고, 같은 섹션을 건드렸을 때만 숨긴 항목의 자리가 바뀐다. 두 번 재현했다. 위치로 보이는 곳: 프로젝트 순서 저장 시 숨긴 항목을 합치는 부분(`shared/project-order.ts`).
+- **다른 호스트의 패널 안내에 서버 ID가 그대로 나온다**: B의 세션을 패널로 열면 "다른 호스트(srv_…)의 채팅은 아직 여기에 표시할 수 없습니다. Paseo에서 열어 보세요."로 나온다. 사이드바는 "Host B"라는 이름을 쓰는데 여기만 내부 ID다.
+- "다시 표시" 버튼의 접근성 레이블에 프로젝트 이름과 호스트가 없다(이전 회차와 같음).
+
+## 정리 상태
+
+격리 데몬 두 개(`/private/tmp/atrium-uxre3a`, `/private/tmp/atrium-uxre3b`)와 정적 서버는 종료했다. 임시 폴더 `/private/tmp/atrium-uxre3a`, `…3b`, `/private/tmp/atrium-uxre3-fx`가 남아 있다. 추가한 것은 이 섹션과 `re3-*.png` 3장이다.
