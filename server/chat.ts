@@ -4,12 +4,13 @@ import { join } from "node:path";
 import type { PluginServerContext, PluginSubscriptionContext } from "@getpaseo/plugin/server";
 import type { z } from "zod";
 import { computeChatLinks, toChatItem } from "../shared/chat/convert";
+import { CHAT_DIR_NAME } from "../shared/chat/folder";
 import { chatLinks, chatOlder, chatSend, chatTimelines, ensureChatDir, type ChatItem } from "../shared/chat/rpc";
 
 import { ownHostId } from "./core/host-id";
 
 /** The daemon user's scratch folder for free chat. Not a git repo, so no worktrees. */
-export const CHAT_DIR = join(homedir(), ".paseo-chat");
+export const CHAT_DIR = join(homedir(), CHAT_DIR_NAME);
 
 type TimelineHandle = ReturnType<PluginSubscriptionContext["paseo"]["agents"]["ref"]>["timeline"];
 type TimelinePage = Awaited<ReturnType<TimelineHandle["refetch"]>>;

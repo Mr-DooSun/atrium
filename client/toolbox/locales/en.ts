@@ -80,6 +80,9 @@ const en = {
     noteMissing: "Missing"
   },
   mcp: {
+    authorizeInBrowser: "Open browser to authorize",
+    authorizeHint: "Approve the connection in your browser, then close this dialog to refresh the MCP list.",
+    authorizeOpenFailed: "Could not open the browser.",
     servers: "Servers",
     count: "Servers: {{n}}",
     searchPlaceholder: "Search by name, scope, or target",

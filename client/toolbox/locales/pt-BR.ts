@@ -82,6 +82,9 @@ export default {
     noteMissing: "Ausente"
   },
   mcp: {
+    authorizeInBrowser: "Autorizar no navegador",
+    authorizeHint: "Autorize a conexão no navegador e feche esta janela para atualizar a lista de MCP.",
+    authorizeOpenFailed: "Não foi possível abrir o navegador.",
     servers: "Servidores",
     count: "Servidores: {{n}}",
     searchPlaceholder: "Buscar por nome, escopo ou destino",

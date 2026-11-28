@@ -82,6 +82,9 @@ export default {
     noteMissing: "غير موجود"
   },
   mcp: {
+    authorizeInBrowser: "التفويض في المتصفح",
+    authorizeHint: "وافق على الاتصال في المتصفح، ثم أغلق هذه النافذة لتحديث قائمة MCP.",
+    authorizeOpenFailed: "تعذّر فتح المتصفح.",
     servers: "الخوادم",
     count: "الخوادم: {{n}}",
     searchPlaceholder: "البحث بالاسم أو النطاق أو الوجهة",

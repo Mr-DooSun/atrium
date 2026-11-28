@@ -115,6 +115,9 @@ function toolboxStrings(t: Translate, numbers: Intl.NumberFormat, compact: Intl.
       noteMissing: t("targets.noteMissing"),
     },
     mcp: {
+      authorizeInBrowser: t("mcp.authorizeInBrowser"),
+      authorizeHint: t("mcp.authorizeHint"),
+      authorizeOpenFailed: t("mcp.authorizeOpenFailed"),
       servers: t("mcp.servers"),
       count: (n: number) => t("mcp.count", { n }),
       searchPlaceholder: t("mcp.searchPlaceholder"),

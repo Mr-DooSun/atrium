@@ -82,6 +82,9 @@ export default {
     noteMissing: "不存在"
   },
   mcp: {
+    authorizeInBrowser: "在浏览器中授权",
+    authorizeHint: "在浏览器中允许连接，然后关闭此对话框以刷新 MCP 列表。",
+    authorizeOpenFailed: "无法打开浏览器。",
     servers: "服务器",
     count: "{{n}} 个服务器",
     searchPlaceholder: "按名称、范围或目标搜索",

@@ -82,6 +82,9 @@ export default {
     noteMissing: "Отсутствует"
   },
   mcp: {
+    authorizeInBrowser: "Авторизовать в браузере",
+    authorizeHint: "Разрешите подключение в браузере, затем закройте окно, чтобы обновить список MCP.",
+    authorizeOpenFailed: "Не удалось открыть браузер.",
     servers: "Серверы",
     count: "Серверов: {{n}}",
     searchPlaceholder: "Поиск по имени, области или цели",
