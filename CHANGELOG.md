@@ -7,6 +7,8 @@ features or behavior changes go in a minor release (0.2.0).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-28
+
 ### Changed
 
 - Two or more consecutive rows in one checkout are grouped under a header line that names their branch (and worktree folder) once, lined up with their titles and joined to the color bar. Rows in the group no longer repeat the badge or the small worktree icon, and nothing is indented further: the header takes the place of the badge line the group's first row used to have. A lone row keeps its own badge, and the main checkout off its default branch gets a grey bar in a group. A worktree folder named after its branch (`feat/x` in `x`) no longer repeats as a chip next to the branch, so the branch name has room.
@@ -167,7 +169,8 @@ First public release.
 - The toolbox confirmation shows the full command and no longer repeats warnings.
 - Calls to the Paseo CLI pass `--home` explicitly, and displayed paths are shortened to `~` only inside the home folder.
 
-[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Mr-DooSun/atrium/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.7.0
 [0.6.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Mr-DooSun/atrium/releases/tag/v0.4.0
