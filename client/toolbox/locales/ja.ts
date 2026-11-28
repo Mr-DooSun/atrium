@@ -82,6 +82,9 @@ export default {
     noteMissing: "なし"
   },
   mcp: {
+    authorizeInBrowser: "ブラウザーで認証",
+    authorizeHint: "ブラウザーで接続を許可し、この画面を閉じて MCP 一覧を更新してください。",
+    authorizeOpenFailed: "ブラウザーを開けませんでした。",
     servers: "サーバー",
     count: "サーバー {{n}} 件",
     searchPlaceholder: "名前・範囲・接続先で検索",

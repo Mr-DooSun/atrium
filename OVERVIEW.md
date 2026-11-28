@@ -8,7 +8,7 @@ Turn it on under Settings, Sidebar, Sidebar view, Atrium. Sub-agents show under 
 - Drag projects and sessions to set your own order, which every client sees. On mobile, long-press a project header instead.
 - Rename a workspace; the name is saved as its Paseo title, so every client shows it.
 - Hide a project from the Atrium sidebar and bring it back from Hidden projects. Its workspaces, sessions and files remain available in Paseo. Archiving a session also archives its workspace when nothing else runs there.
-- Chats that belong to no project live in a General section pinned at the bottom. On web and desktop, folded rows and sections stay folded across reloads.
+- Chats that belong to no project live in a General section pinned at the bottom. With multiple hosts, each host shows its latest chat and can expand independently. Filter by host to narrow the list. An empty host offers to start a chat; on a remote host its chat folder must already exist. Collapsed workspaces show how many sessions they hide. On web and desktop, folded rows and sections stay folded across reloads.
 
 ## Panes
 
@@ -26,7 +26,7 @@ Paseo's usage panel covers your default Claude and Codex accounts. Atrium adds a
 
 In an agent chat, `/mcp` and `/plugins` open full screens in place of the providers' own commands. The Command Center has the same items.
 
-- `/mcp` lists, adds and removes MCP servers for Claude Code, Codex and Antigravity. For a server that needs a login, it shows how to sign in with that CLI.
+- `/mcp` lists, adds and removes MCP servers for Claude Code, Codex and Antigravity. For Claude-hosted connectors it offers to continue sign-in in the browser. For other servers it shows how to sign in with the provider's CLI.
 - `/plugins` manages Claude Code, Codex and Antigravity plugins by profile. Claude Code and Codex have searchable catalogs and installed lists. Claude Code also supports enabling, disabling and updating plugins, and Antigravity supports enabling and disabling them. You can install from a GitHub URL or local folder for Antigravity, or from a marketplace not added yet for Claude Code.
 - The Paseo tab directs you to the selected host’s Settings → Plugins, where Paseo handles browsing, installation and updates.
 - Each account is its own profile, and one change can run on several profiles. Every change asks for confirmation first. Plugin and marketplace changes and MCP additions also show the exact command for each profile, its source and any warnings; removing an MCP server shows a warning instead of a command.
@@ -49,10 +49,13 @@ Atrium runs on the daemon host with your user's permissions. It sends nothing to
 
 - Each additional Claude account's OAuth token goes to `https://api.anthropic.com/api/oauth/usage` to read its limits, at most once a minute per account. Redirects are refused, and the token is not logged, stored or returned to the app.
 - Panes reads timelines and parent links through the Paseo daemon. The `chat.send` RPC passes message text and the host and agent IDs to the daemon. It checks the target host, agent, workspace and project before sending the text through Paseo’s agent API. On the server, pane sends are text only and steer active turns.
+- General reads chat and workspace metadata across the app's configured Paseo hosts. Starting a chat uses that host's existing connection to open its chat project.
+- For a Claude-hosted connector, the daemon passes the Claude authorization link to the Paseo client. The client opens it on `claude.ai` only when you select the browser sign-in action.
 
 **Commands it runs on the daemon host** (separate processes, no shell, each name, source and option value passed as its own argument)
 
 - Each profile's own CLI with that profile's environment: `claude` (`auth status`, `mcp`, `plugin`, `plugin marketplace`), `codex` (`login status`, `mcp`, `plugin`, `plugin marketplace`) and `agy` (`--version`, `plugin`). Listing runs when a screen opens; changes run only after you confirm. These CLIs may contact their own services, for example to check MCP servers or download plugins.
+- For a Claude-hosted connector, `claude mcp login --no-browser -- <name>` requests an authorization link using the selected profile after you confirm.
 - Plugin changes: `claude plugin install`, `uninstall`, `enable`, `disable` and `update` (with `-s` for the scope, and `--marketplace` when the marketplace is not added yet) and `claude plugin marketplace add`, `remove` and `update`; `codex plugin add` and `remove` and `codex plugin marketplace add`, `remove` and `upgrade`; `agy plugin install`, `uninstall`, `enable` and `disable`.
 - Read-only `git` (`rev-parse`, `worktree list`, `symbolic-ref`, `for-each-ref`) in each session's folder for worktree badges and the default branch. It runs against the session's folder, not any `GIT_DIR` or similar variables set for the daemon, and each folder's answer is reused for a few seconds.
 - On macOS, `/usr/bin/security find-generic-password` to read an additional Claude account's login from the Keychain.
@@ -85,4 +88,4 @@ Atrium runs on the daemon host with your user's permissions. It sends nothing to
 - Claude limits come from Anthropic's usage endpoint; accounts that use an API key, a custom base URL, Bedrock, Vertex or Foundry show no limits, and an expired login shows Paseo's re-login prompt.
 - Codex limits come from the newest snapshot in local session logs, shown with the time it was recorded; they can be out of date, and a window past its reset time shows 0%.
 - Panes show agents of the host the plugin runs on. Agents from other hosts open in Paseo instead.
-- Codex MCP servers are user scope only. Signing in to an MCP server happens in the CLI itself; the toolbox shows the command or steps. Antigravity plugins are browsed in Antigravity itself.
+- Codex MCP servers are user scope only. The toolbox shows sign-in steps for MCP servers that require authentication in the CLI. Antigravity plugins are browsed in Antigravity itself.

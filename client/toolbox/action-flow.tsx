@@ -5,7 +5,7 @@
 import { Fragment, useCallback, useReducer, useRef, useState, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
-import { usePaseo } from "@getpaseo/plugin/client";
+import { openExternalUrl, usePaseo } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import type { ActionPreview, CommandResult } from "../../shared/toolbox/types";
 import { trackReducer, type ActivityKind, type TrackEvent, type TrackState } from "./store-logic";
@@ -183,9 +183,12 @@ export function useActionFlow(hostId: string): ActionFlow {
       setHidden(true);
       return;
     }
+    if (phase.kind === "result" && phase.results.some(({ result }) => result.authorizationUrl)) {
+      for (const queryKey of phase.action.invalidate) void queryClient.invalidateQueries({ queryKey });
+    }
     token.current++;
     setPhase({ kind: "closed" });
-  }, [phase.kind]);
+  }, [phase, queryClient]);
 
   const picked = useCallback(() => {
     if (phase.kind !== "pick") return;
@@ -219,7 +222,10 @@ export function useActionFlow(hostId: string): ActionFlow {
         done.push({ target: item.target, result });
         if (token.current === mine) setPhase({ kind: "running", action, items, done: [...done] });
       }
-      await Promise.all(action.invalidate.map((queryKey) => queryClient.invalidateQueries({ queryKey }))).catch(() => {});
+      const needsAuthorization = done.some(({ result }) => result.authorizationUrl);
+      if (!needsAuthorization) {
+        await Promise.all(action.invalidate.map((queryKey) => queryClient.invalidateQueries({ queryKey }))).catch(() => {});
+      }
       action.onResults?.(done);
       const failed = done.find((d) => !d.result.ok);
       if (tracking) {
@@ -230,7 +236,7 @@ export function useActionFlow(hostId: string): ActionFlow {
         );
       }
       if (token.current !== mine) return;
-      const quiet = !failed && skipped.length === 0 && done.every((d) => !d.result.needsReload);
+      const quiet = !failed && !needsAuthorization && skipped.length === 0 && done.every(({ result }) => !result.needsReload);
       if (hiddenRef.current && quiet) {
         // Nothing left to read or do: say so and stay out of the way.
         toast.show(t.flow.doneToast(action.subject), { variant: "success" });
@@ -303,8 +309,11 @@ function FlowModal({
   const { action } = phase;
   const secrets = action.secrets ?? [];
   const allOk = phase.kind === "result" && phase.results.length > 0 && phase.results.every((r) => r.result.ok);
+  const needsAuthorization = phase.kind === "result" && phase.results.some(({ result }) => result.authorizationUrl);
   const icon =
-    phase.kind === "result" ? (
+    needsAuthorization ? (
+      <Icon name="ExternalLink" size={16} color={p.foreground} />
+    ) : phase.kind === "result" ? (
       <Icon name={allOk ? "CircleCheck" : "CircleX"} size={16} color={allOk ? p.success : p.danger} />
     ) : (
       <Icon name={action.destructive ? "TriangleAlert" : "Terminal"} size={16} color={action.destructive ? p.danger : p.foreground} />
@@ -525,6 +534,7 @@ function ResultBody({
 }) {
   const t = useToolboxText();
   const { p } = useLook();
+  const toast = useToast();
   const okCount = results.filter((r) => r.result.ok).length;
   // Every touched profile that asks for a reload, once each.
   const reloads = new Map<string, string>();
@@ -534,6 +544,22 @@ function ResultBody({
   }
 
   const one = ({ result }: TargetResult) => {
+    const url = result.authorizationUrl;
+    if (url) {
+      return (
+        <View style={{ gap: 8 }}>
+          <Text style={{ color: p.foreground, fontSize: 13 }}>{t.mcp.authorizeHint}</Text>
+          <View style={{ flexDirection: "row" }}>
+            <Button
+              icon="ExternalLink"
+              label={t.mcp.authorizeInBrowser}
+              tone="primary"
+              onPress={() => void openExternalUrl(url).catch(() => toast.error(t.mcp.authorizeOpenFailed))}
+            />
+          </View>
+        </View>
+      );
+    }
     const output = result.output.trim();
     return (
       <>

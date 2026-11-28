@@ -82,6 +82,9 @@ export default {
     noteMissing: "없음"
   },
   mcp: {
+    authorizeInBrowser: "브라우저에서 인증",
+    authorizeHint: "브라우저에서 연결을 허용한 뒤 이 창을 닫으면 MCP 목록을 새로고침합니다.",
+    authorizeOpenFailed: "브라우저를 열 수 없습니다.",
     servers: "서버",
     count: "서버 {{n}}개",
     searchPlaceholder: "이름 · 범위 · 대상으로 검색",

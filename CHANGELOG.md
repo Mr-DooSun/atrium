@@ -12,6 +12,7 @@ features or behavior changes go in a minor release (0.2.0).
 - Two or more consecutive rows in one checkout are grouped under a header line that names their branch (and worktree folder) once, lined up with their titles and joined to the color bar. Rows in the group no longer repeat the badge or the small worktree icon, and nothing is indented further: the header takes the place of the badge line the group's first row used to have. A lone row keeps its own badge, and the main checkout off its default branch gets a grey bar in a group. A worktree folder named after its branch (`feat/x` in `x`) no longer repeats as a chip next to the branch, so the branch name has room.
 - Group general chats by host and add a host filter. With several hosts, each host previews one chat and expands independently. Empty hosts offer a new chat action.
 - Show the number of hidden sessions on collapsed workspace rows.
+- Open browser sign-in for Claude-hosted MCP connectors from the toolbox.
 
 ### Fixed
 

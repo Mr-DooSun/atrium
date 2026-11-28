@@ -136,6 +136,8 @@ export const CommandResult = z.object({
   error: z.string().nullable(),
   /** The change needs open sessions of this profile to reload before they see it. */
   needsReload: z.boolean(),
+  /** A browser step is still required before the MCP server is connected. */
+  authorizationUrl: z.string().optional(),
 });
 export type CommandResult = z.infer<typeof CommandResult>;
 

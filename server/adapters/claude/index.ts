@@ -279,7 +279,21 @@ export const claudeAdapter: ProviderAdapter = {
     const args = ["mcp", "remove", ...(scope ? ["-s", scope] : []), "--", name];
     return mutate(profile, scopedPreview(preview(profile, args, null), scope, cwd), cwd);
   },
-  async loginMcp(profile, _cwd, name) {
+  async loginMcp(profile, cwd, name) {
+    // Hosted connectors finish authorization on claude.ai. The CLI prints a link and exits.
+    if (name.startsWith("claude.ai ")) {
+      const args = ["mcp", "login", "--no-browser", "--", name];
+      const result = await runProfile(profile, args, { cwd: cwd ?? homedir(), timeoutMs: 15_000 });
+      if (result.code === 0 && !result.timedOut && !result.truncated) {
+        const links = (result.stdout + "\n" + result.stderr).matchAll(/^\s*(https:\/\/claude\.ai\/\S+)\s*$/gm);
+        for (const [, link] of links) {
+          const url = new URL(link);
+          if (url.origin === "https://claude.ai" && /^\/api\/organizations\/[\w-]+\/mcp\/start-auth\/[\w-]+$/.test(url.pathname)) {
+            return { command: argvOf(profile, args), ok: true, output: "", error: null, needsReload: false, authorizationUrl: url.href };
+          }
+        }
+      }
+    }
     return { command: [], ok: false, output: "", needsReload: false,
       error: `Open Claude in a terminal with profile ${profile.id} and authenticate ${name} in /mcp. mcp login --no-browser needs the redirect URL entered.` };
   },

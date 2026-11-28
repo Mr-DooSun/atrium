@@ -41,6 +41,28 @@ test("catalog merges installed entries and filters independently of marketplace 
 
 const profile = { command: "/example/claude", args: ["--wrapper"], env: {}, id: "profile", configHome: null };
 
+test("Slack sign-in returns the selected profile's Claude authorization link", async () => {
+  const url = "https://claude.ai/api/organizations/example-org/mcp/start-auth/mcpsrv_example?product_surface=claude_code";
+  const script = `
+    const args = process.argv.slice(1).join("|");
+    if (args !== "mcp|login|--no-browser|--|claude.ai Slack" || process.cwd() !== "/") process.exit(1);
+    console.log("Visit this URL to authorize:\\n  " + process.env.AUTH_URL);
+  `;
+  const p = { ...profile, command: process.execPath, args: ["-e", script, "--"], env: { AUTH_URL: url } };
+  const result = await claudeAdapter.loginMcp(p, "/", "claude.ai Slack");
+  assert.equal(result.ok, true);
+  assert.equal(result.authorizationUrl, url);
+  assert.equal(result.needsReload, false);
+  assert.equal(result.output, "");
+
+  for (const invalid of [url.replace("claude.ai", "claude.ai.example.com"), url.replace("start-auth", "unrelated")]) {
+    const rejected = await claudeAdapter.loginMcp({ ...p, env: { AUTH_URL: invalid } }, "/", "claude.ai Slack");
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.authorizationUrl, undefined);
+    assert.ok(!JSON.stringify(rejected).includes(invalid));
+  }
+});
+
 test("previews use profile executable and keep option-like identifiers positional", async () => {
   const add = await claudeAdapter.previewMcpAdd(profile, null, { name: "--help", scope: "user", transport: "http",
     target: "https://example.com/mcp", args: [], env: {}, headers: { Authorization: "sample" } });
