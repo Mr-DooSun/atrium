@@ -1,22 +1,25 @@
 // General: conversations that belong to no project. Paseo agents always run in a folder, so
-// they run in one scratch folder on the daemon (~/.paseo-chat). The section is pinned under the
-// tree, and the tree leaves that folder's workspaces out.
+// they run in one scratch folder on each daemon (~/.paseo-chat). The section is pinned under the
+// tree and gathers every host's chat folder into one list; the tree leaves those folders out.
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import {
+  getPaseoClient,
   useAgent,
   useAgents,
+  useHosts,
   useProjects,
-  usePaseo,
   useRpc,
   useTranslation,
   useWorkspaces,
   type AgentRef,
   type PluginSidebarViewProps,
 } from "@getpaseo/plugin/client";
-import { Icon, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { ensureChatDir } from "../shared/chat/rpc";
+import { CHAT_DIR_NAME, isChatFolder } from "../shared/chat/folder";
+import { useOwnHost } from "./own-host";
 import { chatText } from "./chat-strings";
 import { sidebarText } from "./sidebar-strings";
 import { ROW, TITLE_LINE, type Palette } from "./look";
@@ -28,10 +31,6 @@ import { useCollapsed } from "./collapsed-store";
 
 /** The General section's key in the folded set; never a ref key. */
 const GENERAL_KEY = "atrium:general";
-
-/** Rows shown before "show more"; the list scrolls inside its own box past this. */
-const VISIBLE = 5;
-const LIST_MAX_HEIGHT = ROW.minHeight * 8;
 
 /** The chat folder's absolute path on the daemon, created on first use. */
 export function useChatDir(): string | null {
@@ -54,19 +53,29 @@ export function ChatSection({
   p: Palette;
   chatDir: string | null;
 }) {
-  const paseo = usePaseo();
   const toast = useToast();
   const { t } = useTranslation(chatText);
+  const { t: tSidebar } = useTranslation(sidebarText);
+  const ensure = useRpc(ensureChatDir);
   // Folded state kept across reloads with the tree's (web, Electron).
   const [collapsed, toggleCollapsed] = useCollapsed();
   const open = !collapsed.has(GENERAL_KEY);
-  const [expanded, setExpanded] = useState(false);
-  const [starting, setStarting] = useState(false);
+  const [expandedHosts, setExpandedHosts] = useState<ReadonlySet<string>>(() => new Set());
+  const [startingHost, setStartingHost] = useState<string | null>(null);
+  const [openingProject, setOpeningProject] = useState<{ hostId: string; id: string } | null>(null);
+  const [selectedHost, setSelectedHost] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
 
-  const project = useProjects({ where: (pr) => chatDir !== null && pr.rootPath === chatDir })[0] ?? null;
+  const ownHost = useOwnHost();
+  const projects = useProjects({ where: (pr) => isChatFolder(pr.rootPath, chatDir) });
   const workspaces = useWorkspaces({
-    where: (w) => chatDir !== null && w.projectRootPath === chatDir && !w.archivingAt,
+    where: (w) => isChatFolder(w.projectRootPath, chatDir) && !w.background && !w.archivingAt,
   });
+  const hosts = useHosts();
+  const multipleHosts = hosts.length > 1;
+  const filterHost = multipleHosts && hosts.some((host) => host.serverId === selectedHost) ? selectedHost : null;
+  const hostLabel = (hostId: string) =>
+    hosts.find((host) => host.serverId === hostId)?.label || hostId;
   const workspaceKeys = useMemo(() => new Set(workspaces.map((w) => w.key)), [workspaces]);
   // Every agent in the chat folder, sub-agents included, to tell which chats own their workspace.
   const byWorkspace = useAgents({
@@ -83,30 +92,50 @@ export function ChatSection({
     orderBy: ["lastActivityAt", "desc"],
   });
 
-  // The first chat registers the folder as a project; open it once the project shows up.
+  // The first chat registers the folder as a project; wait for its host-scoped ref.
   useEffect(() => {
-    if (starting && project) {
-      setStarting(false);
-      view.navigation.openProject(project);
-    }
-  }, [starting, project, view.navigation]);
-
-  const newChat = () => {
-    if (!chatDir || starting) return;
+    if (!openingProject) return;
+    const project = projects.find((pr) => pr.hostId === openingProject.hostId && pr.id === openingProject.id);
     if (project) {
-      // Paseo's own new-workspace screen: its composer picks the provider, last used first.
+      setOpeningProject(null);
+      setStartingHost(null);
       view.navigation.openProject(project);
       return;
     }
-    setStarting(true);
-    paseo.workspaces.open(chatDir).catch((error: unknown) => {
-      setStarting(false);
-      toast.error(error instanceof Error ? error.message : t("openFailed"));
-    });
+    const timer = setTimeout(() => {
+      setOpeningProject(null);
+      setStartingHost(null);
+      toast.error(t("openFailed"));
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [openingProject, projects, view.navigation, toast, t]);
+
+  const newChat = async (hostId: string) => {
+    if (startingHost !== null) return;
+    const project = projects.find((pr) => pr.hostId === hostId);
+    if (project) {
+      view.navigation.openProject(project);
+      return;
+    }
+    setStartingHost(hostId);
+    try {
+      const path = hostId === ownHost ? chatDir ?? (await ensure({})).path : `~/${CHAT_DIR_NAME}`;
+      const workspace = await getPaseoClient(hostId).workspaces.open(path);
+      if (!workspace.projectId) throw new Error(t("openFailed"));
+      setOpeningProject({ hostId, id: workspace.projectId });
+    } catch (error: unknown) {
+      setStartingHost(null);
+      const message = error instanceof Error ? error.message : t("openFailed");
+      toast.error(hostId !== ownHost && message.startsWith("Directory not found:")
+        ? t("missingHostFolder", { host: hostLabel(hostId) })
+        : message);
+    }
   };
 
-  const shown = expanded ? chats : chats.slice(0, VISIBLE);
-  const more = chats.length - shown.length;
+  const defaultHost = filterHost ?? ownHost;
+  const visibleHosts = hosts.filter((host) => filterHost === null || host.serverId === filterHost);
+  const limit = multipleHosts ? 1 : view.layout.compact ? 3 : 5;
+  const count = filterHost === null ? chats.length : chats.filter((chat) => chat.hostId === filterHost).length;
 
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: p.guide, paddingHorizontal: 8, paddingTop: 6, paddingBottom: 8 }}>
@@ -132,15 +161,35 @@ export function ChatSection({
           <Icon name="MessagesSquare" size={14} color={p.muted} />
           <Text numberOfLines={1} style={{ flex: 1, color: p.muted, fontSize: 14, textAlign: "left" }}>
             {t("title")}
-            {chats.length > 0 ? ` ${chats.length}` : ""}
+            {count > 0 ? ` ${count}` : ""}
           </Text>
         </Pressable>
+        {open && multipleHosts ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("filterByHost")}
+            accessibilityHint={filterHost === null ? t("allHosts") : hostLabel(filterHost)}
+            accessibilityState={{ selected: filterHost !== null }}
+            hitSlop={4}
+            onPress={() => setFilterOpen(true)}
+            style={({ pressed }) => ({
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: pressed ? p.pressed : filterHost !== null ? p.selected : "transparent",
+            })}
+          >
+            <Icon name="ListFilter" size={15} color={filterHost === null ? p.muted : p.foreground} />
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("newChat")}
           hitSlop={6}
-          disabled={!chatDir || starting}
-          onPress={newChat}
+          disabled={defaultHost === null || startingHost !== null}
+          onPress={() => { if (defaultHost !== null) void newChat(defaultHost); }}
           style={({ pressed }) => ({
             width: 24,
             height: 24,
@@ -151,7 +200,7 @@ export function ChatSection({
             backgroundColor: pressed ? p.pressed : "transparent",
           })}
         >
-          {starting || !chatDir ? (
+          {startingHost !== null || defaultHost === null ? (
             <ActivityIndicator size="small" color={p.muted} />
           ) : (
             <Icon name="SquarePen" size={14} color={p.muted} />
@@ -159,27 +208,84 @@ export function ChatSection({
         </Pressable>
       </View>
       {open ? (
-        <ScrollView style={{ maxHeight: LIST_MAX_HEIGHT }}>
-          {chats.length === 0 ? (
-            <Pressable onPress={newChat} disabled={!chatDir || starting} style={{ paddingLeft: 30, paddingVertical: 6 }}>
-              <Text style={{ color: p.muted, fontSize: 12 }}>{t("empty")}</Text>
-            </Pressable>
-          ) : (
-            shown.map((ref) => (
-              <ChatRow key={ref.key} reference={ref} sharedWorkspaces={sharedWorkspaces} view={view} p={p} />
-            ))
-          )}
-          {more > 0 || (expanded && chats.length > VISIBLE) ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setExpanded((v) => !v)}
-              style={{ paddingLeft: 30, paddingVertical: 6 }}
-            >
-              <Text style={{ color: p.muted, fontSize: 12 }}>{expanded ? t("showLess") : t("showMore", { n: more })}</Text>
-            </Pressable>
-          ) : null}
+        <ScrollView style={{ maxHeight: ROW.minHeight * (view.layout.compact ? 6 : 8) }}>
+          {visibleHosts.map(({ serverId: hostId }) => {
+            const refs = chats.filter((chat) => chat.hostId === hostId);
+            const expanded = expandedHosts.has(hostId);
+            const shown = expanded ? refs : refs.slice(0, limit);
+            return (
+              <View key={hostId}>
+                {multipleHosts ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 16, paddingRight: 12, paddingVertical: 4 }}>
+                    <Icon name="Server" size={12} color={p.muted} />
+                    <Text accessibilityRole="header" numberOfLines={1} style={{ flex: 1, color: p.muted, fontSize: 11, fontWeight: "600" }}>
+                      {hostLabel(hostId)}
+                    </Text>
+                  </View>
+                ) : null}
+                {shown.map((ref) => (
+                  <ChatRow key={ref.key} reference={ref} sharedWorkspaces={sharedWorkspaces} view={view} p={p} />
+                ))}
+                {refs.length === 0 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={startingHost !== null}
+                    onPress={() => void newChat(hostId)}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 30, paddingVertical: 6 }}
+                  >
+                    {startingHost === hostId ? <ActivityIndicator size="small" color={p.muted} /> : <Icon name="SquarePen" size={12} color={p.muted} />}
+                    <Text style={{ color: p.muted, fontSize: 12 }}>{tSidebar("startChat")}</Text>
+                  </Pressable>
+                ) : null}
+                {refs.length > limit ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded }}
+                    onPress={() => setExpandedHosts((previous) => {
+                      const next = new Set(previous);
+                      if (next.has(hostId)) next.delete(hostId);
+                      else next.add(hostId);
+                      return next;
+                    })}
+                    style={{ paddingLeft: 30, paddingVertical: 6 }}
+                  >
+                    <Text style={{ color: p.muted, fontSize: 12 }}>
+                      {expanded ? t("showLess") : t("showMore", { n: refs.length - limit })}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            );
+          })}
         </ScrollView>
       ) : null}
+      <Modal title={t("filterByHost")} open={filterOpen && multipleHosts} onOpenChange={setFilterOpen}>
+        <Modal.Content contentContainerStyle={{ padding: 16, gap: 4 }}>
+          {[{ id: null, label: t("allHosts") }, ...hosts.map((host) => ({ id: host.serverId, label: hostLabel(host.serverId) }))].map(({ id, label }) => (
+            <Pressable
+              key={id ?? "all"}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: id === filterHost }}
+              onPress={() => {
+                setSelectedHost(id);
+                setFilterOpen(false);
+              }}
+              style={({ pressed }) => ({
+                minHeight: 44,
+                paddingHorizontal: 12,
+                borderRadius: 8,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                backgroundColor: pressed ? p.pressed : id === filterHost ? p.selected : "transparent",
+              })}
+            >
+              <Text style={{ flex: 1, color: p.foreground, fontSize: 14 }}>{label}</Text>
+              {id === filterHost ? <Icon name="Check" size={16} color={p.foreground} /> : null}
+            </Pressable>
+          ))}
+        </Modal.Content>
+      </Modal>
     </View>
   );
 }

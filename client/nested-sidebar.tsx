@@ -23,6 +23,7 @@ import { CONNECT, PROJECT, ROW, TITLE_LINE, connectorX, slotX, palette, worktree
 import { ProviderMark, StatusMark, URGENT, WorktreeBadge, WorktreeBar, agentBucket, isAgentTurnActive, mostUrgent } from "./marks";
 import type { Bucket } from "./look";
 import { ChatSection, useChatDir } from "./chat";
+import { isChatFolder } from "../shared/chat/folder";
 import {
   ArchiveButton,
   ArchiveModal,
@@ -183,7 +184,7 @@ const visibleAgent = (a: PluginAgentSnapshot) => !a.background;
 
 export function NestedSidebar(view: PluginSidebarViewProps) {
   const { t } = useTranslation(sidebarText);
-  // The free chat folder's workspaces live in the pinned section below, not in the tree.
+  // Every host's free chat folder lives in the pinned General section below, not in the tree.
   const chatDir = useChatDir();
   const pendingPermissions = usePendingPermissions();
   const hasPendingPermission = useCallback(
@@ -191,7 +192,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
     [pendingPermissions],
   );
   const inTree = useCallback(
-    (w: PluginWorkspaceSnapshot) => visibleWorkspace(w) && w.projectRootPath !== chatDir,
+    (w: PluginWorkspaceSnapshot) => visibleWorkspace(w) && !isChatFolder(w.projectRootPath, chatDir),
     [chatDir],
   );
   // Agents only reach the tree through their workspace, so filtering workspaces is enough.
@@ -207,7 +208,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   const byParent = useAgents({ where: visibleAgent, groupBy: (a) => a.parentAgent?.key ?? ROOT });
   // Every project, empty ones included: a project whose sessions are all archived keeps its block.
   const projects = useProjects({
-    where: (pr) => pr.rootPath !== chatDir,
+    where: (pr) => !isChatFolder(pr.rootPath, chatDir),
     orderBy: ["displayName", "asc"],
   });
 
@@ -275,7 +276,7 @@ export function NestedSidebar(view: PluginSidebarViewProps) {
   const projectRefs = useMemo(() => new Map(projects.map((r) => [r.key, r])), [projects]);
   // The saved order names projects by host and root folder, which outlive the project's id; the
   // same folder on two hosts is two projects with places of their own.
-  const byRoot = useProjects({ where: (pr) => pr.rootPath !== chatDir, groupBy: (pr) => pr.rootPath });
+  const byRoot = useProjects({ where: (pr) => !isChatFolder(pr.rootPath, chatDir), groupBy: (pr) => pr.rootPath });
   const projectRoot = useMemo(() => {
     const map = new Map<string, { orderKey: string; root: string }>();
     for (const group of byRoot) {
@@ -1349,7 +1350,7 @@ function WorkspaceRow({
       : reference && ctx.view.navigation.openWorkspace(reference);
   if (!ws || !reference || label === undefined) return null;
   const { p } = ctx;
-  const hidden = open ? 0 : countDescendants(node);
+  const hiddenSessions = open ? 0 : childAgents.size;
   const bucket = mostUrgent(ws.indicator, root?.bucket === "needs_input" ? root.bucket : null, below);
   // Only finished work: nothing in this row or below it is running.
   const canArchive = ws.indicator !== "running" && !root?.activeTurn && !hasActiveDescendants;
@@ -1374,7 +1375,6 @@ function WorkspaceRow({
   const branch = !worktree && ws.kind === "worktree" ? ws.branch : null;
   const meta: ReactNode[] = [];
   if (running > 0) meta.push(<Text key="run" style={{ color: p.running }}>{t("runningBelow", { n: running })}</Text>);
-  if (hidden > 0) meta.push(<Text key="hid">{t("collapsedBelow", { n: hidden })}</Text>);
   return (
     <>
     {modal}
@@ -1391,7 +1391,9 @@ function WorkspaceRow({
     <Row
       depth={depth}
       active={active}
-      label={t("openRow", { name: label })}
+      label={hiddenSessions > 0
+        ? `${t("openRow", { name: label })} · ${t("collapsedBelow", { n: hiddenSessions })}`
+        : t("openRow", { name: label })}
       onPress={open_}
       onLongPress={() => setMenu(true)}
       ctx={ctx}
@@ -1417,6 +1419,11 @@ function WorkspaceRow({
               <Text numberOfLines={1} style={titleStyle(ctx, hovered || active)}>
                 {label}
               </Text>
+              {hiddenSessions > 0 ? (
+                <Text style={{ color: p.muted, fontSize: 12, lineHeight: TITLE_LINE, fontVariant: ["tabular-nums"] }}>
+                  {hiddenSessions}
+                </Text>
+              ) : null}
               {ws.additions !== null && ws.deletions !== null ? (
                 <Text style={{ fontSize: 12, lineHeight: TITLE_LINE, fontVariant: ["tabular-nums"] }}>
                   <Text style={{ color: p.success }}>+{ws.additions}</Text>
